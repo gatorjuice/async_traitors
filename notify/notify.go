@@ -17,6 +17,9 @@ const (
 
 // SendDM sends a direct message to a user.
 func SendDM(s *discordgo.Session, userID, content string) error {
+	if s == nil {
+		return nil
+	}
 	ch, err := s.UserChannelCreate(userID)
 	if err != nil {
 		return err
@@ -27,26 +30,41 @@ func SendDM(s *discordgo.Session, userID, content string) error {
 
 // SendChannel sends a message to a channel.
 func SendChannel(s *discordgo.Session, channelID, content string) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, nil
+	}
 	return s.ChannelMessageSend(channelID, content)
 }
 
 // SendEmbed sends a rich embed to a channel.
 func SendEmbed(s *discordgo.Session, channelID string, embed *discordgo.MessageEmbed) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, nil
+	}
 	return s.ChannelMessageSendEmbed(channelID, embed)
 }
 
 // SendThread sends a message to a thread.
 func SendThread(s *discordgo.Session, threadID, content string) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, nil
+	}
 	return s.ChannelMessageSend(threadID, content)
 }
 
 // CreateThread creates a private thread in a channel.
 func CreateThread(s *discordgo.Session, channelID, name string) (*discordgo.Channel, error) {
+	if s == nil {
+		return nil, nil
+	}
 	return s.ThreadStart(channelID, name, discordgo.ChannelTypeGuildPrivateThread, 4320)
 }
 
 // AddToThread adds a user to a private thread.
 func AddToThread(s *discordgo.Session, threadID, userID string) error {
+	if s == nil {
+		return nil
+	}
 	return s.ThreadMemberAdd(threadID, userID)
 }
 

@@ -95,5 +95,44 @@ func HandlePlayers(s *discordgo.Session, i *discordgo.InteractionCreate, databas
 
 // HandleHelp displays help and game rules.
 func HandleHelp(s *discordgo.Session, i *discordgo.InteractionCreate, _ *sql.DB) {
-	respondEphemeral(s, i, "Not yet implemented.")
+	fields := []*discordgo.MessageEmbedField{
+		{
+			Name:  "How to Play",
+			Value: "A social deduction game played over a long weekend. Some players are secretly Traitors trying to eliminate the Faithful. The Faithful must identify and banish the Traitors before it's too late.",
+		},
+		{
+			Name:  "Roles",
+			Value: "**Traitor** — Secretly murder faithful players at night. Win when traitors >= faithful.\n**Faithful** — Find and banish all traitors through voting. Win when all traitors are gone.",
+		},
+		{
+			Name:  "Game Phases",
+			Value: "**Competition** — Compete for shields\n**Discussion** — Talk and strategize\n**Voting** — Vote to banish a suspect\n**Night** — Traitors choose a victim",
+		},
+		{
+			Name:  "Player Commands",
+			Value: "`/join-game` — Join with a code\n`/my-role` — Check your role (DM)\n`/vote` — Vote to banish\n`/murder-vote` — Traitors vote to murder\n`/submit-answer` — Answer competition\n`/claim-shield` — Claim a shield\n`/game-info` — Game status\n`/players` — Player list",
+		},
+		{
+			Name:  "Admin Commands",
+			Value: "`/create-game` — Create a game\n`/start-game` — Start the game\n`/start-competition` — Begin competition\n`/end-competition` — End competition\n`/grant-shield` — Give a shield\n`/set-timers` — Set phase timers\n`/advance-phase` — Skip to next phase\n`/end-game` — Force end",
+		},
+		{
+			Name:  "Shields",
+			Value: "Shields protect you from one murder attempt. Earn them by winning competitions or claiming them during scavenger hunts. The shield is consumed when it blocks a murder.",
+		},
+		{
+			Name:  "Win Conditions",
+			Value: "**Faithful win** — All traitors are banished\n**Traitors win** — Traitors outnumber or equal the faithful",
+		},
+	}
+
+	embed := notify.GameEmbed("Async Traitors — Help", "A social deduction game for Discord", notify.ColorInfo, fields)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	})
 }

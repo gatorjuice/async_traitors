@@ -8,8 +8,8 @@ import (
 
 // TimerManager manages per-game phase timers.
 type TimerManager struct {
-	mu      sync.Mutex
-	timers  map[int64]context.CancelFunc
+	mu     sync.Mutex
+	timers map[int64]context.CancelFunc
 }
 
 // NewTimerManager creates a new TimerManager.
