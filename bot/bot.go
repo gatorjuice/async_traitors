@@ -7,6 +7,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/bot/handlers"
 	"github.com/gatorjuice/async_traitors/config"
+	"github.com/gatorjuice/async_traitors/game"
 )
 
 // Bot is the Discord bot instance.
@@ -14,6 +15,7 @@ type Bot struct {
 	Session *discordgo.Session
 	DB      *sql.DB
 	Config  *config.Config
+	Engine  *game.Engine
 }
 
 // New creates a new Bot instance.
@@ -25,10 +27,13 @@ func New(cfg *config.Config, db *sql.DB) (*Bot, error) {
 
 	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsGuildMembers | discordgo.IntentsDirectMessages
 
+	engine := game.NewEngine(db, session)
+
 	return &Bot{
 		Session: session,
 		DB:      db,
 		Config:  cfg,
+		Engine:  engine,
 	}, nil
 }
 
@@ -65,7 +70,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	case "join-game":
 		handlers.HandleJoinGame(s, i, b.DB)
 	case "start-game":
-		handlers.HandleStartGame(s, i, b.DB)
+		handlers.HandleStartGame(s, i, b.DB, b.Engine)
 	case "my-role":
 		handlers.HandleMyRole(s, i, b.DB)
 	case "game-info":
@@ -89,7 +94,7 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 	case "set-timers":
 		handlers.HandleSetTimers(s, i, b.DB)
 	case "advance-phase":
-		handlers.HandleAdvancePhase(s, i, b.DB)
+		handlers.HandleAdvancePhase(s, i, b.DB, b.Engine)
 	case "end-game":
 		handlers.HandleEndGame(s, i, b.DB)
 	case "help":
