@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"regexp"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
 	"github.com/gatorjuice/async_traitors/notify"
 )
+
+var hhmmPattern = regexp.MustCompile(`^\d{2}:\d{2}$`)
 
 const joinCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -110,6 +114,43 @@ func HandleSetTimers(s *discordgo.Session, i *discordgo.InteractionCreate, datab
 	}
 
 	respondEphemeral(s, i, fmt.Sprintf("Timers updated!\nDiscussion: %dm | Voting: %dm | Night: %dm | Competition: %dm", discussion, voting, night, competition))
+}
+
+// HandleSetHiatus configures quiet hours for the active game.
+func HandleSetHiatus(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
+	game, err := db.GetGameByChannel(database, i.ChannelID)
+	if err != nil {
+		respondEphemeral(s, i, "No active game found in this channel.")
+		return
+	}
+
+	if i.Member.User.ID != game.CreatedBy {
+		respondEphemeral(s, i, "Only the game creator can set quiet hours.")
+		return
+	}
+
+	opts := i.ApplicationCommandData().Options
+	start := opts[0].StringValue()
+	end := opts[1].StringValue()
+	tz := opts[2].StringValue()
+
+	if !hhmmPattern.MatchString(start) || !hhmmPattern.MatchString(end) {
+		respondEphemeral(s, i, "Invalid time format. Use HH:MM (e.g. 22:00).")
+		return
+	}
+
+	if _, err := time.LoadLocation(tz); err != nil {
+		respondEphemeral(s, i, "Invalid timezone. Use IANA format (e.g. America/New_York, Europe/London, UTC).")
+		return
+	}
+
+	if err := db.UpdateGameHiatus(database, game.ID, start, end, tz); err != nil {
+		respondEphemeral(s, i, "Failed to update quiet hours.")
+		slog.Error("update hiatus", "error", err)
+		return
+	}
+
+	respondEphemeral(s, i, fmt.Sprintf("Quiet hours set: %s–%s (%s). Timers will pause during this window.", start, end, tz))
 }
 
 // HandleEndGame force-ends the active game.

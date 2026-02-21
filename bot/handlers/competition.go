@@ -82,9 +82,8 @@ func HandleStartCompetition(s *discordgo.Session, i *discordgo.InteractionCreate
 
 // HandleSubmitAnswer submits a competition answer.
 func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
-	g, err := db.GetGameByChannel(database, i.ChannelID)
-	if err != nil {
-		respondEphemeral(s, i, "No active game found in this channel.")
+	g, _ := requirePlayer(s, i, database)
+	if g == nil {
 		return
 	}
 
@@ -109,6 +108,10 @@ func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, da
 		slog.Error("submit answer", "error", err)
 		return
 	}
+
+	// Announce submission
+	notify.SendChannel(s, g.ChannelID,
+		fmt.Sprintf("**%s** has submitted an answer!", i.Member.User.Username))
 
 	if correct {
 		respondEphemeral(s, i, "Correct!")
@@ -176,15 +179,39 @@ func HandleEndCompetition(s *discordgo.Session, i *discordgo.InteractionCreate, 
 		return
 	}
 
-	// Announce results
-	var summary string
-	correctCount := 0
-	for _, r := range results {
-		if r.Correct {
-			correctCount++
-		}
+	// Build leaderboard
+	alive, _ := db.GetAlivePlayers(database, g.ID)
+	playerNames := make(map[string]string)
+	for _, p := range alive {
+		playerNames[p.DiscordID] = p.DiscordName
 	}
-	summary = fmt.Sprintf("Competition ended! %d correct answer(s) from %d submission(s).", correctCount, len(results))
+
+	var leaderboard string
+	correctCount := 0
+	rank := 1
+	for _, r := range results {
+		if !r.Correct {
+			continue
+		}
+		correctCount++
+		name := r.PlayerDiscordID
+		if n, ok := playerNames[r.PlayerDiscordID]; ok {
+			name = n
+		}
+		if activeComp.CompType == "speed" {
+			leaderboard += fmt.Sprintf("%d. **%s** — %.1fs\n", rank, name, float64(r.TimeMs)/1000)
+		} else {
+			leaderboard += fmt.Sprintf("%d. **%s**\n", rank, name)
+		}
+		rank++
+	}
+
+	if leaderboard == "" {
+		leaderboard = "No correct answers!"
+	}
+
+	summary := fmt.Sprintf("%d of %d players participated.\n\n**Leaderboard:**\n%s",
+		len(results), len(alive), leaderboard)
 
 	embed := notify.GameEmbed("Competition Results", summary, notify.ColorSuccess, nil)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", g.CurrentRound)

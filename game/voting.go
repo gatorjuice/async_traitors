@@ -48,6 +48,10 @@ func CastBanishmentVote(database *sql.DB, s *discordgo.Session, gameID int64, ro
 		return false, nil
 	}
 
+	// Progress indicator
+	notify.SendChannel(s, game.ChannelID,
+		fmt.Sprintf("A vote has been cast. (%d of %d players have voted)", voteCount, len(alive)))
+
 	return voteCount >= len(alive), nil
 }
 
@@ -123,7 +127,7 @@ func TallyBanishmentVotes(database *sql.DB, s *discordgo.Session, gameID int64, 
 	}
 
 	banishedID := topTargets[0]
-	if err := db.UpdatePlayerStatus(database, gameID, banishedID, string(PlayerBanished)); err != nil {
+	if err := db.UpdatePlayerStatusWithRound(database, gameID, banishedID, string(PlayerBanished), round); err != nil {
 		return "", err
 	}
 
@@ -140,6 +144,22 @@ func TallyBanishmentVotes(database *sql.DB, s *discordgo.Session, gameID int64, 
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", round)
 	notify.SendEmbed(s, game.ChannelID, embed)
+
+	// Close vote commentary
+	if maxVotes == len(votes) {
+		notify.SendChannel(s, game.ChannelID, "The group was unanimous.")
+	} else {
+		// Find second-highest vote count
+		secondMax := 0
+		for id, c := range counts {
+			if id != banishedID && c > secondMax {
+				secondMax = c
+			}
+		}
+		if maxVotes-secondMax == 1 {
+			notify.SendChannel(s, game.ChannelID, "It was a close vote!")
+		}
+	}
 
 	if err := RevealRole(database, s, gameID, banishedID); err != nil {
 		slog.Error("reveal role after banishment", "error", err)

@@ -79,5 +79,21 @@ func RunMigrations(db *sql.DB) error {
 	);`
 
 	_, err := db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Idempotent ALTER TABLE migrations for new columns.
+	alters := []string{
+		`ALTER TABLE games ADD COLUMN hiatus_start TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE games ADD COLUMN hiatus_end TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE games ADD COLUMN hiatus_timezone TEXT NOT NULL DEFAULT 'UTC'`,
+		`ALTER TABLE players ADD COLUMN status_round INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, q := range alters {
+		// Ignore "duplicate column" errors from re-running migrations.
+		_, _ = db.Exec(q)
+	}
+
+	return nil
 }

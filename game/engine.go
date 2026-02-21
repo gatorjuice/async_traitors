@@ -92,8 +92,11 @@ func (e *Engine) StartGame(gameID int64) error {
 	embed.Footer.Text = "Async Traitors | Round 1"
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
 
+	// Reload game to get full state after updates
+	game, _ = db.GetGameByID(e.DB, gameID)
+
 	// Start competition timer
-	e.startPhaseTimer(gameID, game.TimerCompetitionMinutes)
+	e.startPhaseTimer(game, game.TimerCompetitionMinutes)
 
 	return nil
 }
@@ -150,6 +153,9 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 		if finished {
 			return e.endGame(gameID, winner, game.CurrentRound)
 		}
+
+		// Post round recap before starting next round
+		e.postRoundRecap(gameID, game.CurrentRound)
 
 		// Start next round
 		newRound := game.CurrentRound + 1
@@ -218,7 +224,11 @@ func (e *Engine) startCompetitionPhase(game *db.Game) {
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game.ID, game.TimerCompetitionMinutes)
+	e.startPhaseTimer(game, game.TimerCompetitionMinutes)
+	e.scheduleWarnings(game, game.TimerCompetitionMinutes, func(remaining int) {
+		notify.SendChannel(e.Session, game.ChannelID,
+			fmt.Sprintf("Competition phase — %d minutes remaining!", remaining))
+	})
 }
 
 func (e *Engine) startDiscussionPhase(game *db.Game) {
@@ -230,7 +240,11 @@ func (e *Engine) startDiscussionPhase(game *db.Game) {
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game.ID, game.TimerDiscussionMinutes)
+	e.startPhaseTimer(game, game.TimerDiscussionMinutes)
+	e.scheduleWarnings(game, game.TimerDiscussionMinutes, func(remaining int) {
+		notify.SendChannel(e.Session, game.ChannelID,
+			fmt.Sprintf("Discussion phase — %d minutes remaining!", remaining))
+	})
 }
 
 func (e *Engine) startVotingPhase(game *db.Game) {
@@ -248,7 +262,26 @@ func (e *Engine) startVotingPhase(game *db.Game) {
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game.ID, game.TimerVotingMinutes)
+	e.startPhaseTimer(game, game.TimerVotingMinutes)
+	e.scheduleWarnings(game, game.TimerVotingMinutes, func(remaining int) {
+		votes, _ := db.GetVotes(e.DB, game.ID, game.CurrentRound, "voting")
+		voted := make(map[string]bool, len(votes))
+		for _, v := range votes {
+			voted[v.VoterDiscordID] = true
+		}
+		nonVoters := 0
+		for _, p := range alive {
+			if !voted[p.DiscordID] {
+				nonVoters++
+				notify.SendDM(e.Session, p.DiscordID,
+					fmt.Sprintf("Reminder: %d minutes left to vote! Use `/vote` in the game channel.", remaining))
+			}
+		}
+		if nonVoters > 0 {
+			notify.SendChannel(e.Session, game.ChannelID,
+				fmt.Sprintf("%d player(s) still need to vote — %d minutes remaining!", nonVoters, remaining))
+		}
+	})
 }
 
 func (e *Engine) startNightPhase(game *db.Game) {
@@ -274,17 +307,149 @@ func (e *Engine) startNightPhase(game *db.Game) {
 			fmt.Sprintf("**Night %d** — Choose your victim!\n\nUse `/murder-vote player:@name` to vote.\n\n**Available targets:**\n%s", game.CurrentRound, targets))
 	}
 
-	e.startPhaseTimer(game.ID, game.TimerNightMinutes)
-}
-
-func (e *Engine) startPhaseTimer(gameID int64, minutes int) {
-	duration := time.Duration(minutes) * time.Minute
-	e.Timers.StartTimer(gameID, duration, func() {
-		slog.Info("phase timer expired", "game", gameID)
-		if err := e.AdvancePhase(gameID); err != nil {
-			slog.Error("auto-advance phase", "error", err, "game", gameID)
+	e.startPhaseTimer(game, game.TimerNightMinutes)
+	e.scheduleWarnings(game, game.TimerNightMinutes, func(remaining int) {
+		traitors, _ := db.GetPlayersByRole(e.DB, game.ID, "traitor")
+		votes, _ := db.GetVotes(e.DB, game.ID, game.CurrentRound, "night")
+		voted := make(map[string]bool, len(votes))
+		for _, v := range votes {
+			voted[v.VoterDiscordID] = true
+		}
+		nonVoters := 0
+		for _, t := range traitors {
+			if !voted[t.DiscordID] {
+				nonVoters++
+				notify.SendDM(e.Session, t.DiscordID,
+					fmt.Sprintf("Reminder: %d minutes left for night phase! Use `/murder-vote` to choose your victim.", remaining))
+			}
+		}
+		if nonVoters > 0 && game.TraitorThreadID != "" {
+			notify.SendThread(e.Session, game.TraitorThreadID,
+				fmt.Sprintf("%d traitor(s) still need to vote — %d minutes remaining!", nonVoters, remaining))
 		}
 	})
+}
+
+func (e *Engine) startPhaseTimer(g *db.Game, minutes int) {
+	active := time.Duration(minutes) * time.Minute
+	wall := EffectiveWallDuration(time.Now(), active, g.HiatusStart, g.HiatusEnd, g.HiatusTimezone)
+	e.Timers.StartTimer(g.ID, wall, func() {
+		// If timer fires during hiatus, wait until it ends.
+		if IsInHiatus(g.HiatusStart, g.HiatusEnd, g.HiatusTimezone, time.Now()) {
+			wait := TimeUntilHiatusEnd(g.HiatusStart, g.HiatusEnd, g.HiatusTimezone, time.Now())
+			slog.Info("phase timer waiting for hiatus to end", "game", g.ID, "wait", wait)
+			time.Sleep(wait)
+		}
+		slog.Info("phase timer expired", "game", g.ID)
+		if err := e.AdvancePhase(g.ID); err != nil {
+			slog.Error("auto-advance phase", "error", err, "game", g.ID)
+		}
+	})
+}
+
+// scheduleWarnings schedules warning callbacks at halfway and 5-minutes-remaining.
+// warningFn receives the remaining minutes as its argument.
+func (e *Engine) scheduleWarnings(g *db.Game, activeMinutes int, warningFn func(remaining int)) {
+	if activeMinutes <= 10 {
+		// Only schedule 5-min warning if the phase is long enough.
+		if activeMinutes > 5 {
+			delay := EffectiveWallDuration(time.Now(), time.Duration(activeMinutes-5)*time.Minute, g.HiatusStart, g.HiatusEnd, g.HiatusTimezone)
+			e.Timers.ScheduleCallback(g.ID, delay, func() {
+				if !IsInHiatus(g.HiatusStart, g.HiatusEnd, g.HiatusTimezone, time.Now()) {
+					warningFn(5)
+				}
+			})
+		}
+		return
+	}
+
+	// Halfway warning
+	halfDelay := EffectiveWallDuration(time.Now(), time.Duration(activeMinutes/2)*time.Minute, g.HiatusStart, g.HiatusEnd, g.HiatusTimezone)
+	e.Timers.ScheduleCallback(g.ID, halfDelay, func() {
+		if !IsInHiatus(g.HiatusStart, g.HiatusEnd, g.HiatusTimezone, time.Now()) {
+			warningFn(activeMinutes - activeMinutes/2)
+		}
+	})
+
+	// 5-minute warning
+	fiveDelay := EffectiveWallDuration(time.Now(), time.Duration(activeMinutes-5)*time.Minute, g.HiatusStart, g.HiatusEnd, g.HiatusTimezone)
+	e.Timers.ScheduleCallback(g.ID, fiveDelay, func() {
+		if !IsInHiatus(g.HiatusStart, g.HiatusEnd, g.HiatusTimezone, time.Now()) {
+			warningFn(5)
+		}
+	})
+}
+
+// postRoundRecap posts a summary of what happened during the completed round.
+func (e *Engine) postRoundRecap(gameID int64, completedRound int) {
+	g, err := db.GetGameByID(e.DB, gameID)
+	if err != nil {
+		return
+	}
+
+	banished, _ := db.GetPlayersByStatusAndRound(e.DB, gameID, "banished", completedRound)
+	murdered, _ := db.GetPlayersByStatusAndRound(e.DB, gameID, "murdered", completedRound)
+	alive, _ := db.GetAlivePlayers(e.DB, gameID)
+	shieldLog, _ := db.GetShieldLog(e.DB, gameID)
+
+	var desc string
+	if len(banished) > 0 {
+		for _, p := range banished {
+			roleName := "FAITHFUL"
+			if p.Role == "traitor" {
+				roleName = "TRAITOR"
+			}
+			desc += fmt.Sprintf("Banished: **%s** (%s)\n", p.DiscordName, roleName)
+		}
+	} else {
+		desc += "No one was banished.\n"
+	}
+
+	if len(murdered) > 0 {
+		for _, p := range murdered {
+			roleName := "FAITHFUL"
+			if p.Role == "traitor" {
+				roleName = "TRAITOR"
+			}
+			desc += fmt.Sprintf("Murdered: **%s** (%s)\n", p.DiscordName, roleName)
+		}
+	} else {
+		// Check if a shield was used this round
+		shieldUsed := false
+		for _, entry := range shieldLog {
+			if entry.RoundUsed != nil && *entry.RoundUsed == completedRound {
+				shieldUsed = true
+				break
+			}
+		}
+		if shieldUsed {
+			desc += "A shield blocked the traitors' attack!\n"
+		} else {
+			desc += "No one was murdered. A peaceful night.\n"
+		}
+	}
+
+	// Count active shields
+	activeShields := 0
+	for _, p := range alive {
+		if p.HasShield {
+			activeShields++
+		}
+	}
+
+	fields := []*discordgo.MessageEmbedField{
+		{Name: "Players Remaining", Value: fmt.Sprintf("%d", len(alive)), Inline: true},
+		{Name: "Active Shields", Value: fmt.Sprintf("%d", activeShields), Inline: true},
+	}
+
+	embed := notify.GameEmbed(
+		fmt.Sprintf("Round %d Recap", completedRound),
+		desc,
+		notify.ColorInfo,
+		fields,
+	)
+	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d Complete", completedRound)
+	notify.SendEmbed(e.Session, g.ChannelID, embed)
 }
 
 func (e *Engine) endGame(gameID int64, winner string, round int) error {

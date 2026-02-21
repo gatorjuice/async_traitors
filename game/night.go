@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
@@ -54,6 +55,12 @@ func CastMurderVote(database *sql.DB, s *discordgo.Session, gameID int64, round 
 	traitors, err := db.GetPlayersByRole(database, gameID, "traitor")
 	if err != nil {
 		return false, nil
+	}
+
+	// Progress indicator in traitor thread
+	if game.TraitorThreadID != "" {
+		notify.SendThread(s, game.TraitorThreadID,
+			fmt.Sprintf("(%d of %d traitors have voted)", voteCount, len(traitors)))
 	}
 
 	return voteCount >= len(traitors), nil
@@ -105,6 +112,12 @@ func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round in
 		return err
 	}
 
+	// Dramatic teaser (skip sleep in tests when session is nil)
+	notify.SendChannel(s, game.ChannelID, "The sun rises... the players gather nervously...")
+	if s != nil {
+		time.Sleep(3 * time.Second)
+	}
+
 	// Check shield
 	if target.HasShield {
 		if err := db.ConsumeShield(database, gameID, targetID, round); err != nil {
@@ -112,9 +125,13 @@ func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round in
 		}
 
 		notify.SendDM(s, targetID, "Your shield saved you from murder tonight!")
+		notify.SendChannel(s, game.ChannelID, "The traitors struck, but something unexpected happened...")
+		if s != nil {
+			time.Sleep(2 * time.Second)
+		}
 		embed := notify.GameEmbed(
-			"Night Phase",
-			"The traitors tried to strike, but their target was protected!",
+			"Shield Block!",
+			"The traitors tried to strike, but their target was protected by a shield!",
 			notify.ColorNight,
 			nil,
 		)
@@ -124,8 +141,12 @@ func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round in
 	}
 
 	// Murder the target
-	if err := db.UpdatePlayerStatus(database, gameID, targetID, string(PlayerMurdered)); err != nil {
+	if err := db.UpdatePlayerStatusWithRound(database, gameID, targetID, string(PlayerMurdered), round); err != nil {
 		return err
+	}
+
+	if s != nil {
+		time.Sleep(2 * time.Second)
 	}
 
 	embed := notify.GameEmbed(

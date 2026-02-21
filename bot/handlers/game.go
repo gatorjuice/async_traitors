@@ -31,6 +31,13 @@ func HandleGameInfo(s *discordgo.Session, i *discordgo.InteractionCreate, databa
 			game.TimerDiscussionMinutes, game.TimerVotingMinutes, game.TimerNightMinutes, game.TimerCompetitionMinutes), Inline: false},
 	}
 
+	if game.HiatusStart != "" && game.HiatusEnd != "" {
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:  "Quiet Hours",
+			Value: fmt.Sprintf("%s–%s (%s)", game.HiatusStart, game.HiatusEnd, game.HiatusTimezone),
+		})
+	}
+
 	embed := notify.GameEmbed("Game Info", "", notify.ColorInfo, fields)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Game #%d", game.ID)
 
@@ -127,6 +134,81 @@ func HandleHelp(s *discordgo.Session, i *discordgo.InteractionCreate, _ *sql.DB)
 	}
 
 	embed := notify.GameEmbed("Async Traitors — Help", "A social deduction game for Discord", notify.ColorInfo, fields)
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Embeds: []*discordgo.MessageEmbed{embed},
+			Flags:  discordgo.MessageFlagsEphemeral,
+		},
+	})
+}
+
+// HandleRecap shows the game timeline for all rounds.
+func HandleRecap(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
+	game, _ := requirePlayer(s, i, database)
+	if game == nil {
+		return
+	}
+
+	if game.CurrentRound == 0 {
+		respondEphemeral(s, i, "The game hasn't started yet.")
+		return
+	}
+
+	shieldLog, _ := db.GetShieldLog(database, game.ID)
+
+	var timeline string
+	for round := 1; round <= game.CurrentRound; round++ {
+		timeline += fmt.Sprintf("**Round %d**\n", round)
+
+		banished, _ := db.GetPlayersByStatusAndRound(database, game.ID, "banished", round)
+		murdered, _ := db.GetPlayersByStatusAndRound(database, game.ID, "murdered", round)
+
+		if len(banished) > 0 {
+			for _, p := range banished {
+				roleName := "Faithful"
+				if p.Role == "traitor" {
+					roleName = "Traitor"
+				}
+				timeline += fmt.Sprintf("  Banished: **%s** (%s)\n", p.DiscordName, roleName)
+			}
+		} else {
+			timeline += "  No banishment\n"
+		}
+
+		if len(murdered) > 0 {
+			for _, p := range murdered {
+				roleName := "Faithful"
+				if p.Role == "traitor" {
+					roleName = "Traitor"
+				}
+				timeline += fmt.Sprintf("  Murdered: **%s** (%s)\n", p.DiscordName, roleName)
+			}
+		} else {
+			// Check for shield blocks this round
+			shieldUsed := false
+			for _, entry := range shieldLog {
+				if entry.RoundUsed != nil && *entry.RoundUsed == round {
+					shieldUsed = true
+					break
+				}
+			}
+			if shieldUsed {
+				timeline += "  Shield blocked the attack\n"
+			} else {
+				timeline += "  Peaceful night\n"
+			}
+		}
+
+		timeline += "\n"
+	}
+
+	alive, _ := db.GetAlivePlayers(database, game.ID)
+	timeline += fmt.Sprintf("**%d players remaining**", len(alive))
+
+	embed := notify.GameEmbed("Game Recap", timeline, notify.ColorInfo, nil)
+	embed.Footer.Text = fmt.Sprintf("Async Traitors | Game #%d", game.ID)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,

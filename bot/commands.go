@@ -148,4 +148,32 @@ var Commands = []*discordgo.ApplicationCommand{
 		Name:        "help",
 		Description: "Show help and game rules",
 	},
+	{
+		Name:        "set-hiatus",
+		Description: "Set quiet hours — timers pause during this window (admin)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "start",
+				Description: "Start time in HH:MM (24h format)",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "end",
+				Description: "End time in HH:MM (24h format)",
+				Required:    true,
+			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "timezone",
+				Description: "IANA timezone name (e.g. America/New_York, Europe/London, UTC)",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "recap",
+		Description: "Show the game timeline so far",
+	},
 }

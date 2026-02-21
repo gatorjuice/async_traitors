@@ -14,13 +14,14 @@ type Player struct {
 	Role        string
 	Status      string
 	HasShield   bool
+	StatusRound int
 	JoinedAt    time.Time
 }
 
 func scanPlayer(row interface{ Scan(...any) error }) (*Player, error) {
 	p := &Player{}
 	var hasShield int
-	err := row.Scan(&p.ID, &p.GameID, &p.DiscordID, &p.DiscordName, &p.Role, &p.Status, &hasShield, &p.JoinedAt)
+	err := row.Scan(&p.ID, &p.GameID, &p.DiscordID, &p.DiscordName, &p.Role, &p.Status, &hasShield, &p.StatusRound, &p.JoinedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func scanPlayers(rows *sql.Rows) ([]Player, error) {
 	return players, rows.Err()
 }
 
-const playerColumns = `id, game_id, discord_id, discord_name, role, status, has_shield, joined_at`
+const playerColumns = `id, game_id, discord_id, discord_name, role, status, has_shield, status_round, joined_at`
 
 // AddPlayer adds a player to a game.
 func AddPlayer(db *sql.DB, gameID int64, discordID, discordName string) error {
@@ -111,4 +112,20 @@ func CountPlayersByStatus(db *sql.DB, gameID int64, status string) (int, error) 
 	var count int
 	err := db.QueryRow(`SELECT COUNT(*) FROM players WHERE game_id = ? AND status = ?`, gameID, status).Scan(&count)
 	return count, err
+}
+
+// UpdatePlayerStatusWithRound sets a player's status and records which round the status change occurred.
+func UpdatePlayerStatusWithRound(db *sql.DB, gameID int64, discordID, status string, round int) error {
+	_, err := db.Exec(`UPDATE players SET status = ?, status_round = ? WHERE game_id = ? AND discord_id = ?`, status, round, gameID, discordID)
+	return err
+}
+
+// GetPlayersByStatusAndRound returns players with the given status who were eliminated in the given round.
+func GetPlayersByStatusAndRound(db *sql.DB, gameID int64, status string, round int) ([]Player, error) {
+	rows, err := db.Query(`SELECT `+playerColumns+` FROM players WHERE game_id = ? AND status = ? AND status_round = ?`, gameID, status, round)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPlayers(rows)
 }

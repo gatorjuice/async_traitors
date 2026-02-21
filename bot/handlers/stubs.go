@@ -81,9 +81,8 @@ func HandleMurderVote(s *discordgo.Session, i *discordgo.InteractionCreate, data
 
 // HandleClaimShield claims a shield (honor system).
 func HandleClaimShield(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
-	g, err := db.GetGameByChannel(database, i.ChannelID)
-	if err != nil {
-		respondEphemeral(s, i, "No active game found in this channel.")
+	g, _ := requirePlayer(s, i, database)
+	if g == nil {
 		return
 	}
 

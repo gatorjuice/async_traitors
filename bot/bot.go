@@ -147,6 +147,10 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			handlers.HandleEndGame(s, i, b.DB)
 		case "help":
 			handlers.HandleHelp(s, i, b.DB)
+		case "set-hiatus":
+			handlers.HandleSetHiatus(s, i, b.DB)
+		case "recap":
+			handlers.HandleRecap(s, i, b.DB)
 		}
 	})
 }
