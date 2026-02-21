@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/bot/handlers"
@@ -93,7 +94,19 @@ func recoverHandler(name string, handler func()) {
 }
 
 func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Type != discordgo.InteractionApplicationCommand {
+	switch i.Type {
+	case discordgo.InteractionMessageComponent:
+		customID := i.MessageComponentData().CustomID
+		recoverHandler(customID, func() {
+			switch {
+			case strings.HasPrefix(customID, "join-game:"):
+				handlers.HandleJoinButton(s, i, b.DB)
+			}
+		})
+		return
+	case discordgo.InteractionApplicationCommand:
+		// handled below
+	default:
 		return
 	}
 
@@ -113,9 +126,9 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 		case "players":
 			handlers.HandlePlayers(s, i, b.DB)
 		case "vote":
-			handlers.HandleVote(s, i, b.DB)
+			handlers.HandleVote(s, i, b.DB, b.Engine)
 		case "murder-vote":
-			handlers.HandleMurderVote(s, i, b.DB)
+			handlers.HandleMurderVote(s, i, b.DB, b.Engine)
 		case "claim-shield":
 			handlers.HandleClaimShield(s, i, b.DB)
 		case "start-competition":

@@ -32,7 +32,7 @@ func HandleStartGame(s *discordgo.Session, i *discordgo.InteractionCreate, datab
 }
 
 // HandleVote casts a banishment vote.
-func HandleVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
+func HandleVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
 		respondEphemeral(s, i, "No active game found in this channel.")
@@ -40,16 +40,23 @@ func HandleVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *
 	}
 
 	targetUser := i.ApplicationCommandData().Options[0].UserValue(s)
-	if err := game.CastBanishmentVote(database, s, g.ID, g.CurrentRound, i.Member.User.ID, targetUser.ID); err != nil {
+	allVoted, err := game.CastBanishmentVote(database, s, g.ID, g.CurrentRound, i.Member.User.ID, targetUser.ID)
+	if err != nil {
 		respondEphemeral(s, i, err.Error())
 		return
 	}
 
 	respondEphemeral(s, i, "Your vote has been recorded.")
+
+	if allVoted {
+		if err := engine.AdvancePhase(g.ID); err != nil {
+			slog.Error("auto-advance after all votes", "error", err, "game", g.ID)
+		}
+	}
 }
 
 // HandleMurderVote casts a murder vote.
-func HandleMurderVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
+func HandleMurderVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
 		respondEphemeral(s, i, "No active game found in this channel.")
@@ -57,12 +64,19 @@ func HandleMurderVote(s *discordgo.Session, i *discordgo.InteractionCreate, data
 	}
 
 	targetUser := i.ApplicationCommandData().Options[0].UserValue(s)
-	if err := game.CastMurderVote(database, s, g.ID, g.CurrentRound, i.Member.User.ID, targetUser.ID); err != nil {
+	allVoted, err := game.CastMurderVote(database, s, g.ID, g.CurrentRound, i.Member.User.ID, targetUser.ID)
+	if err != nil {
 		respondEphemeral(s, i, err.Error())
 		return
 	}
 
 	respondEphemeral(s, i, "Your murder vote has been recorded.")
+
+	if allVoted {
+		if err := engine.AdvancePhase(g.ID); err != nil {
+			slog.Error("auto-advance after all murder votes", "error", err, "game", g.ID)
+		}
+	}
 }
 
 // HandleClaimShield claims a shield (honor system).

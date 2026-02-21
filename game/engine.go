@@ -242,7 +242,7 @@ func (e *Engine) startVotingPhase(game *db.Game) {
 
 	embed := notify.GameEmbed(
 		"Voting Phase",
-		fmt.Sprintf("Round %d — Time to vote!\n\nUse `/vote player:@name` to cast your vote. Votes are public.\nTimer: %d minutes\n\n**Alive players:**\n%s", game.CurrentRound, game.TimerVotingMinutes, playerList),
+		fmt.Sprintf("Round %d — Time to vote!\n\nUse `/vote player:@name` to cast your vote. Votes are secret — results will be revealed after everyone has voted or the timer expires.\nTimer: %d minutes\n\n**Alive players:**\n%s", game.CurrentRound, game.TimerVotingMinutes, playerList),
 		notify.ColorDanger,
 		nil,
 	)
@@ -347,7 +347,7 @@ func (e *Engine) endGame(gameID int64, winner string, round int) error {
 	}
 
 	embed := notify.GameEmbed(title, description, color, fields)
-	embed.Footer.Text = fmt.Sprintf("Async Traitors | Game Over")
+	embed.Footer.Text = "Async Traitors | Game Over"
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
 
 	return nil

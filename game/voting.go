@@ -12,33 +12,43 @@ import (
 	"github.com/gatorjuice/async_traitors/notify"
 )
 
-// CastBanishmentVote records a public banishment vote.
-func CastBanishmentVote(database *sql.DB, s *discordgo.Session, gameID int64, round int, voterID, targetID string) error {
+// CastBanishmentVote records a secret banishment vote. Returns true if all alive players have voted.
+func CastBanishmentVote(database *sql.DB, s *discordgo.Session, gameID int64, round int, voterID, targetID string) (bool, error) {
 	game, err := db.GetGameByID(database, gameID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if game.CurrentPhase != string(PhaseVoting) {
-		return errors.New("voting is not open right now")
+		return false, errors.New("voting is not open right now")
 	}
 
 	voter, err := db.GetPlayer(database, gameID, voterID)
 	if err != nil || voter.Status != "alive" {
-		return errors.New("you cannot vote")
+		return false, errors.New("you cannot vote")
 	}
 
 	target, err := db.GetPlayer(database, gameID, targetID)
 	if err != nil || target.Status != "alive" {
-		return errors.New("that player cannot be voted for")
+		return false, errors.New("that player cannot be voted for")
 	}
 
 	if err := db.CastVote(database, gameID, round, "voting", voterID, targetID); err != nil {
-		return err
+		return false, err
 	}
 
-	notify.SendChannel(s, game.ChannelID, fmt.Sprintf("**%s** voted to banish **%s**", voter.DiscordName, target.DiscordName))
-	return nil
+	// Check if all alive players have voted
+	voteCount, err := db.CountVotes(database, gameID, round, "voting")
+	if err != nil {
+		return false, nil
+	}
+
+	alive, err := db.GetAlivePlayers(database, gameID)
+	if err != nil {
+		return false, nil
+	}
+
+	return voteCount >= len(alive), nil
 }
 
 // TallyBanishmentVotes tallies votes and resolves the banishment.
@@ -57,6 +67,31 @@ func TallyBanishmentVotes(database *sql.DB, s *discordgo.Session, gameID int64, 
 		notify.SendChannel(s, game.ChannelID, "No votes were cast. No one is banished.")
 		return "", nil
 	}
+
+	// Reveal all individual votes now that voting is complete
+	var voteLines string
+	for _, v := range votes {
+		voter, _ := db.GetPlayer(database, gameID, v.VoterDiscordID)
+		target, _ := db.GetPlayer(database, gameID, v.TargetDiscordID)
+		voterName := v.VoterDiscordID
+		targetName := v.TargetDiscordID
+		if voter != nil {
+			voterName = voter.DiscordName
+		}
+		if target != nil {
+			targetName = target.DiscordName
+		}
+		voteLines += fmt.Sprintf("• **%s** voted to banish **%s**\n", voterName, targetName)
+	}
+
+	voteEmbed := notify.GameEmbed(
+		"Votes Revealed",
+		voteLines,
+		notify.ColorWarning,
+		nil,
+	)
+	voteEmbed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", round)
+	notify.SendEmbed(s, game.ChannelID, voteEmbed)
 
 	// Count votes per target
 	counts := make(map[string]int)

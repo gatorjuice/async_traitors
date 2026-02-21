@@ -51,11 +51,22 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 
 	embed := notify.GameEmbed(
 		"New Game Created!",
-		fmt.Sprintf("A new game of Async Traitors has been created!\n\n**Join Code:** `%s`\n\nPlayers can join with `/join-game code:%s`", code, code),
+		fmt.Sprintf("A new game of Async Traitors has been created!\n\n**Join Code:** `%s`\n\nPlayers can join with `/join-game code:%s` or click the button below.", code, code),
 		notify.ColorSuccess,
 		nil,
 	)
-	notify.SendEmbed(s, channelID, embed)
+	components := []discordgo.MessageComponent{
+		discordgo.ActionsRow{
+			Components: []discordgo.MessageComponent{
+				discordgo.Button{
+					Label:    "Join Game",
+					Style:    discordgo.SuccessButton,
+					CustomID: "join-game:" + code,
+				},
+			},
+		},
+	}
+	notify.SendEmbedWithComponents(s, channelID, embed, components)
 
 	respondEphemeral(s, i, fmt.Sprintf("Game created! Join code: **%s** (Game #%d)", code, gameID))
 }

@@ -68,6 +68,17 @@ func AddToThread(s *discordgo.Session, threadID, userID string) error {
 	return s.ThreadMemberAdd(threadID, userID)
 }
 
+// SendEmbedWithComponents sends a rich embed with message components (e.g. buttons) to a channel.
+func SendEmbedWithComponents(s *discordgo.Session, channelID string, embed *discordgo.MessageEmbed, components []discordgo.MessageComponent) (*discordgo.Message, error) {
+	if s == nil {
+		return nil, nil
+	}
+	return s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: components,
+	})
+}
+
 // GameEmbed constructs a standard embed with the given parameters.
 func GameEmbed(title, description string, color int, fields []*discordgo.MessageEmbedField) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{

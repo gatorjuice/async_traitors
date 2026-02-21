@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
@@ -88,4 +89,32 @@ func HandleMyRole(s *discordgo.Session, i *discordgo.InteractionCreate, database
 	}
 
 	respondEphemeral(s, i, "Check your DMs!")
+}
+
+// HandleJoinButton handles the "Join Game" button interaction.
+func HandleJoinButton(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
+	code := strings.TrimPrefix(i.MessageComponentData().CustomID, "join-game:")
+
+	game, err := db.GetGameByJoinCode(database, code)
+	if err != nil {
+		respondEphemeral(s, i, "Game not found. The join code may have expired.")
+		return
+	}
+
+	if game.Status != "lobby" {
+		respondEphemeral(s, i, "This game has already started.")
+		return
+	}
+
+	playerID := i.Member.User.ID
+	playerName := i.Member.User.Username
+
+	if err := db.AddPlayer(database, game.ID, playerID, playerName); err != nil {
+		respondEphemeral(s, i, "You may have already joined this game.")
+		slog.Error("add player via button", "error", err)
+		return
+	}
+
+	notify.SendChannel(s, game.ChannelID, fmt.Sprintf("**%s** has joined the game!", playerName))
+	respondEphemeral(s, i, fmt.Sprintf("You've joined the game in <#%s>!", game.ChannelID))
 }

@@ -12,40 +12,51 @@ import (
 	"github.com/gatorjuice/async_traitors/notify"
 )
 
-// CastMurderVote records a traitor's murder vote.
-func CastMurderVote(database *sql.DB, s *discordgo.Session, gameID int64, round int, voterID, targetID string) error {
+// CastMurderVote records a traitor's murder vote. Returns true if all alive traitors have voted.
+func CastMurderVote(database *sql.DB, s *discordgo.Session, gameID int64, round int, voterID, targetID string) (bool, error) {
 	game, err := db.GetGameByID(database, gameID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if game.CurrentPhase != string(PhaseNight) {
-		return errors.New("it is not night time")
+		return false, errors.New("it is not night time")
 	}
 
 	voter, err := db.GetPlayer(database, gameID, voterID)
 	if err != nil || voter.Status != "alive" || voter.Role != string(RoleTraitor) {
-		return errors.New("only living traitors can vote to murder")
+		return false, errors.New("only living traitors can vote to murder")
 	}
 
 	target, err := db.GetPlayer(database, gameID, targetID)
 	if err != nil || target.Status != "alive" {
-		return errors.New("that player cannot be targeted")
+		return false, errors.New("that player cannot be targeted")
 	}
 
 	if target.Role == string(RoleTraitor) {
-		return errors.New("you cannot murder a fellow traitor")
+		return false, errors.New("you cannot murder a fellow traitor")
 	}
 
 	if err := db.CastVote(database, gameID, round, "night", voterID, targetID); err != nil {
-		return err
+		return false, err
 	}
 
 	if game.TraitorThreadID != "" {
 		notify.SendThread(s, game.TraitorThreadID, fmt.Sprintf("**%s** voted to murder **%s**", voter.DiscordName, target.DiscordName))
 	}
 
-	return nil
+	// Check if all alive traitors have voted
+	voteCount, err := db.CountVotes(database, gameID, round, "night")
+	if err != nil {
+		return false, nil
+	}
+
+	traitors, err := db.GetPlayersByRole(database, gameID, "traitor")
+	if err != nil {
+		return false, nil
+	}
+
+	return voteCount >= len(traitors), nil
 }
 
 // ResolveNight tallies murder votes and resolves the night phase.
