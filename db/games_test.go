@@ -62,7 +62,7 @@ func TestUpdateGameStatus(t *testing.T) {
 
 	id, _ := CreateGame(db, "ST1234", "guild1", "chan1", "user1")
 
-	if err := UpdateGameStatus(db, id, "active", "competition"); err != nil {
+	if err := UpdateGameStatus(db, id, "active", "breakfast"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,8 +70,8 @@ func TestUpdateGameStatus(t *testing.T) {
 	if game.Status != "active" {
 		t.Errorf("expected active, got %s", game.Status)
 	}
-	if game.CurrentPhase != "competition" {
-		t.Errorf("expected competition, got %s", game.CurrentPhase)
+	if game.CurrentPhase != "breakfast" {
+		t.Errorf("expected breakfast, got %s", game.CurrentPhase)
 	}
 }
 
@@ -85,16 +85,16 @@ func TestUpdateGameTimers(t *testing.T) {
 	}
 
 	game, _ := GetGameByID(db, id)
-	if game.TimerDiscussionMinutes != 10 {
-		t.Errorf("expected discussion 10, got %d", game.TimerDiscussionMinutes)
+	if game.TimerBreakfastMinutes != 10 {
+		t.Errorf("expected breakfast 10, got %d", game.TimerBreakfastMinutes)
 	}
-	if game.TimerVotingMinutes != 20 {
-		t.Errorf("expected voting 20, got %d", game.TimerVotingMinutes)
+	if game.TimerRoundtableMinutes != 20 {
+		t.Errorf("expected roundtable 20, got %d", game.TimerRoundtableMinutes)
 	}
 	if game.TimerNightMinutes != 30 {
 		t.Errorf("expected night 30, got %d", game.TimerNightMinutes)
 	}
-	if game.TimerCompetitionMinutes != 40 {
-		t.Errorf("expected competition 40, got %d", game.TimerCompetitionMinutes)
+	if game.TimerMissionMinutes != 40 {
+		t.Errorf("expected mission 40, got %d", game.TimerMissionMinutes)
 	}
 }

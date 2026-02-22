@@ -42,7 +42,7 @@ func TestShieldLogEntries(t *testing.T) {
 	gameID := createTestGame(t, database, 4)
 	pids := getPlayerIDs(t, database, gameID)
 
-	db.GrantShield(database, gameID, pids[0], "competition", 1)
+	db.GrantShield(database, gameID, pids[0], "mission", 1)
 	db.ConsumeShield(database, gameID, pids[0], 2)
 
 	log, err := db.GetShieldLog(database, gameID)
@@ -52,7 +52,7 @@ func TestShieldLogEntries(t *testing.T) {
 	if len(log) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(log))
 	}
-	if log[0].Source != "competition" {
+	if log[0].Source != "mission" {
 		t.Errorf("expected source=competition, got %s", log[0].Source)
 	}
 	if log[0].RoundGranted != 1 {

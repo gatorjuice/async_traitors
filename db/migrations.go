@@ -15,11 +15,12 @@ func RunMigrations(db *sql.DB) error {
 		current_phase TEXT NOT NULL DEFAULT 'lobby',
 		current_round INTEGER NOT NULL DEFAULT 0,
 		traitor_thread_id TEXT NOT NULL DEFAULT '',
-		timer_discussion_minutes INTEGER NOT NULL DEFAULT 480,
-		timer_voting_minutes INTEGER NOT NULL DEFAULT 240,
+		timer_breakfast_minutes INTEGER NOT NULL DEFAULT 480,
+		timer_roundtable_minutes INTEGER NOT NULL DEFAULT 240,
 		timer_night_minutes INTEGER NOT NULL DEFAULT 240,
-		timer_competition_minutes INTEGER NOT NULL DEFAULT 60,
+		timer_mission_minutes INTEGER NOT NULL DEFAULT 60,
 		reveal_threshold INTEGER NOT NULL DEFAULT 4,
+		recruitment_pending INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -76,6 +77,15 @@ func RunMigrations(db *sql.DB) error {
 		round_granted INTEGER NOT NULL,
 		round_used INTEGER,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS payments (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		game_id INTEGER NOT NULL REFERENCES games(id),
+		winner_discord_id TEXT NOT NULL,
+		loser_discord_id TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(game_id, winner_discord_id, loser_discord_id)
 	);`
 
 	_, err := db.Exec(schema)
@@ -83,12 +93,21 @@ func RunMigrations(db *sql.DB) error {
 		return err
 	}
 
-	// Idempotent ALTER TABLE migrations for new columns.
+	// Idempotent ALTER TABLE migrations for new columns and renames.
 	alters := []string{
+		// Rename old timer columns to new names (idempotent: fails silently if already renamed).
+		`ALTER TABLE games RENAME COLUMN timer_discussion_minutes TO timer_breakfast_minutes`,
+		`ALTER TABLE games RENAME COLUMN timer_voting_minutes TO timer_roundtable_minutes`,
+		`ALTER TABLE games RENAME COLUMN timer_competition_minutes TO timer_mission_minutes`,
+		// New columns.
 		`ALTER TABLE games ADD COLUMN hiatus_start TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE games ADD COLUMN hiatus_end TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE games ADD COLUMN hiatus_timezone TEXT NOT NULL DEFAULT 'UTC'`,
 		`ALTER TABLE players ADD COLUMN status_round INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE players ADD COLUMN recruited_round INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE games ADD COLUMN recruitment_pending INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE games ADD COLUMN buyin_amount INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE players ADD COLUMN wallet_info TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, q := range alters {
 		// Ignore "duplicate column" errors from re-running migrations.

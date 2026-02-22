@@ -131,11 +131,19 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			handlers.HandleMurderVote(s, i, b.DB, b.Engine)
 		case "claim-shield":
 			handlers.HandleClaimShield(s, i, b.DB)
-		case "start-competition":
+		case "recruit":
+			handlers.HandleRecruit(s, i, b.DB, b.Engine)
+		case "accept-recruitment":
+			handlers.HandleAcceptRecruitment(s, i, b.DB, b.Engine)
+		case "refuse-recruitment":
+			handlers.HandleRefuseRecruitment(s, i, b.DB, b.Engine)
+		case "force-recruit":
+			handlers.HandleForceRecruit(s, i, b.DB, b.Engine)
+		case "start-mission":
 			handlers.HandleStartCompetition(s, i, b.DB)
 		case "submit-answer":
 			handlers.HandleSubmitAnswer(s, i, b.DB)
-		case "end-competition":
+		case "end-mission":
 			handlers.HandleEndCompetition(s, i, b.DB)
 		case "grant-shield":
 			handlers.HandleGrantShield(s, i, b.DB)
@@ -151,6 +159,18 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			handlers.HandleSetHiatus(s, i, b.DB)
 		case "recap":
 			handlers.HandleRecap(s, i, b.DB)
+		case "rules":
+			handlers.HandleRules(s, i, b.DB)
+		case "set-buyin":
+			handlers.HandleSetBuyin(s, i, b.DB)
+		case "wallet":
+			handlers.HandleWallet(s, i, b.DB, b.Engine)
+		case "mark-paid":
+			handlers.HandleMarkPaid(s, i, b.DB)
+		case "payment-status":
+			handlers.HandlePaymentStatus(s, i, b.DB)
+		case "nuke-games":
+			handlers.HandleNukeGames(s, i, b.DB)
 		}
 	})
 }

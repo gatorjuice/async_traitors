@@ -9,15 +9,15 @@ import (
 func TestTallyVotes_ClearWinner(t *testing.T) {
 	database := testDB(t)
 	gameID := createTestGame(t, database, 4)
-	db.UpdateGameStatus(database, gameID, "active", "voting")
+	db.UpdateGameStatus(database, gameID, "active", "roundtable")
 	db.UpdateGameRound(database, gameID, 1)
 
 	pids := getPlayerIDs(t, database, gameID)
 
 	// 3 votes for pids[0]
-	db.CastVote(database, gameID, 1, "voting", pids[1], pids[0])
-	db.CastVote(database, gameID, 1, "voting", pids[2], pids[0])
-	db.CastVote(database, gameID, 1, "voting", pids[3], pids[0])
+	db.CastVote(database, gameID, 1, "roundtable", pids[1], pids[0])
+	db.CastVote(database, gameID, 1, "roundtable", pids[2], pids[0])
+	db.CastVote(database, gameID, 1, "roundtable", pids[3], pids[0])
 
 	banished, err := TallyBanishmentVotes(database, nil, gameID, 1)
 	if err != nil {
@@ -36,14 +36,14 @@ func TestTallyVotes_ClearWinner(t *testing.T) {
 func TestTallyVotes_Tie(t *testing.T) {
 	database := testDB(t)
 	gameID := createTestGame(t, database, 4)
-	db.UpdateGameStatus(database, gameID, "active", "voting")
+	db.UpdateGameStatus(database, gameID, "active", "roundtable")
 	db.UpdateGameRound(database, gameID, 1)
 
 	pids := getPlayerIDs(t, database, gameID)
 
 	// 1 vote each — tie
-	db.CastVote(database, gameID, 1, "voting", pids[2], pids[0])
-	db.CastVote(database, gameID, 1, "voting", pids[3], pids[1])
+	db.CastVote(database, gameID, 1, "roundtable", pids[2], pids[0])
+	db.CastVote(database, gameID, 1, "roundtable", pids[3], pids[1])
 
 	banished, err := TallyBanishmentVotes(database, nil, gameID, 1)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestTallyVotes_Tie(t *testing.T) {
 func TestTallyVotes_NoVotes(t *testing.T) {
 	database := testDB(t)
 	gameID := createTestGame(t, database, 4)
-	db.UpdateGameStatus(database, gameID, "active", "voting")
+	db.UpdateGameStatus(database, gameID, "active", "roundtable")
 	db.UpdateGameRound(database, gameID, 1)
 
 	banished, err := TallyBanishmentVotes(database, nil, gameID, 1)

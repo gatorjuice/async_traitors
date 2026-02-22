@@ -4,13 +4,11 @@ import "testing"
 
 func TestValidTransitions(t *testing.T) {
 	valid := []struct{ from, to Phase }{
-		{PhaseLobby, PhaseCompetition},
-		{PhaseLobby, PhaseDiscussion},
-		{PhaseCompetition, PhaseDiscussion},
-		{PhaseDiscussion, PhaseVoting},
-		{PhaseVoting, PhaseNight},
-		{PhaseNight, PhaseCompetition},
-		{PhaseNight, PhaseDiscussion},
+		{PhaseLobby, PhaseBreakfast},
+		{PhaseBreakfast, PhaseMission},
+		{PhaseMission, PhaseRoundtable},
+		{PhaseRoundtable, PhaseNight},
+		{PhaseNight, PhaseBreakfast},
 	}
 
 	for _, tc := range valid {
@@ -22,15 +20,17 @@ func TestValidTransitions(t *testing.T) {
 
 func TestInvalidTransitions(t *testing.T) {
 	invalid := []struct{ from, to Phase }{
-		{PhaseLobby, PhaseVoting},
+		{PhaseLobby, PhaseRoundtable},
 		{PhaseLobby, PhaseNight},
-		{PhaseCompetition, PhaseVoting},
-		{PhaseCompetition, PhaseNight},
-		{PhaseDiscussion, PhaseCompetition},
-		{PhaseDiscussion, PhaseNight},
-		{PhaseVoting, PhaseCompetition},
-		{PhaseVoting, PhaseDiscussion},
-		{PhaseNight, PhaseVoting},
+		{PhaseLobby, PhaseMission},
+		{PhaseBreakfast, PhaseRoundtable},
+		{PhaseBreakfast, PhaseNight},
+		{PhaseMission, PhaseBreakfast},
+		{PhaseMission, PhaseNight},
+		{PhaseRoundtable, PhaseBreakfast},
+		{PhaseRoundtable, PhaseMission},
+		{PhaseNight, PhaseMission},
+		{PhaseNight, PhaseRoundtable},
 	}
 
 	for _, tc := range invalid {

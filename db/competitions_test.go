@@ -70,7 +70,7 @@ func TestShieldLog(t *testing.T) {
 	gameID, _ := CreateGame(db, "SL1234", "g1", "c1", "u1")
 	AddPlayer(db, gameID, "p1", "Alice")
 
-	if err := GrantShield(db, gameID, "p1", "competition", 1); err != nil {
+	if err := GrantShield(db, gameID, "p1", "mission", 1); err != nil {
 		t.Fatal(err)
 	}
 

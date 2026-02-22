@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
@@ -66,7 +65,8 @@ func CastMurderVote(database *sql.DB, s *discordgo.Session, gameID int64, round 
 	return voteCount >= len(traitors), nil
 }
 
-// ResolveNight tallies murder votes and resolves the night phase.
+// ResolveNight tallies murder votes and resolves the night phase silently.
+// The murder result is NOT announced publicly — it will be revealed at Breakfast.
 func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round int) error {
 	game, err := db.GetGameByID(database, gameID)
 	if err != nil {
@@ -79,7 +79,10 @@ func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round in
 	}
 
 	if len(votes) == 0 {
-		notify.SendChannel(s, game.ChannelID, "The night passes peacefully. No one was murdered.")
+		// No votes cast — notify traitor thread only
+		if game.TraitorThreadID != "" {
+			notify.SendThread(s, game.TraitorThreadID, "No murder votes were cast tonight.")
+		}
 		return nil
 	}
 
@@ -112,54 +115,32 @@ func ResolveNight(database *sql.DB, s *discordgo.Session, gameID int64, round in
 		return err
 	}
 
-	// Dramatic teaser (skip sleep in tests when session is nil)
-	notify.SendChannel(s, game.ChannelID, "The sun rises... the players gather nervously...")
-	if s != nil {
-		time.Sleep(3 * time.Second)
-	}
-
 	// Check shield
 	if target.HasShield {
 		if err := db.ConsumeShield(database, gameID, targetID, round); err != nil {
 			slog.Error("consume shield", "error", err)
 		}
 
+		// DM the shielded player privately
 		notify.SendDM(s, targetID, "Your shield saved you from murder tonight!")
-		notify.SendChannel(s, game.ChannelID, "The traitors struck, but something unexpected happened...")
-		if s != nil {
-			time.Sleep(2 * time.Second)
+
+		// Notify traitor thread
+		if game.TraitorThreadID != "" {
+			notify.SendThread(s, game.TraitorThreadID,
+				fmt.Sprintf("Your target **%s** was protected by a shield! No one was murdered.", target.DiscordName))
 		}
-		embed := notify.GameEmbed(
-			"Shield Block!",
-			"The traitors tried to strike, but their target was protected by a shield!",
-			notify.ColorNight,
-			nil,
-		)
-		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", round)
-		notify.SendEmbed(s, game.ChannelID, embed)
 		return nil
 	}
 
-	// Murder the target
+	// Murder the target silently (no public announcement — revealed at Breakfast)
 	if err := db.UpdatePlayerStatusWithRound(database, gameID, targetID, string(PlayerMurdered), round); err != nil {
 		return err
 	}
 
-	if s != nil {
-		time.Sleep(2 * time.Second)
-	}
-
-	embed := notify.GameEmbed(
-		"Murder!",
-		fmt.Sprintf("When morning comes, **%s** was found murdered...", target.DiscordName),
-		notify.ColorNight,
-		nil,
-	)
-	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", round)
-	notify.SendEmbed(s, game.ChannelID, embed)
-
-	if err := RevealRole(database, s, gameID, targetID); err != nil {
-		slog.Error("reveal role after murder", "error", err)
+	// Notify traitor thread of the result
+	if game.TraitorThreadID != "" {
+		notify.SendThread(s, game.TraitorThreadID,
+			fmt.Sprintf("**%s** has been murdered. The group will discover this at Breakfast.", target.DiscordName))
 	}
 
 	return nil

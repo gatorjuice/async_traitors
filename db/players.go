@@ -7,21 +7,23 @@ import (
 
 // Player represents a row in the players table.
 type Player struct {
-	ID          int64
-	GameID      int64
-	DiscordID   string
-	DiscordName string
-	Role        string
-	Status      string
-	HasShield   bool
-	StatusRound int
-	JoinedAt    time.Time
+	ID             int64
+	GameID         int64
+	DiscordID      string
+	DiscordName    string
+	Role           string
+	Status         string
+	HasShield      bool
+	StatusRound    int
+	RecruitedRound int
+	WalletInfo     string
+	JoinedAt       time.Time
 }
 
 func scanPlayer(row interface{ Scan(...any) error }) (*Player, error) {
 	p := &Player{}
 	var hasShield int
-	err := row.Scan(&p.ID, &p.GameID, &p.DiscordID, &p.DiscordName, &p.Role, &p.Status, &hasShield, &p.StatusRound, &p.JoinedAt)
+	err := row.Scan(&p.ID, &p.GameID, &p.DiscordID, &p.DiscordName, &p.Role, &p.Status, &hasShield, &p.StatusRound, &p.RecruitedRound, &p.WalletInfo, &p.JoinedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +43,7 @@ func scanPlayers(rows *sql.Rows) ([]Player, error) {
 	return players, rows.Err()
 }
 
-const playerColumns = `id, game_id, discord_id, discord_name, role, status, has_shield, status_round, joined_at`
+const playerColumns = `id, game_id, discord_id, discord_name, role, status, has_shield, status_round, recruited_round, wallet_info, joined_at`
 
 // AddPlayer adds a player to a game.
 func AddPlayer(db *sql.DB, gameID int64, discordID, discordName string) error {
@@ -117,6 +119,18 @@ func CountPlayersByStatus(db *sql.DB, gameID int64, status string) (int, error) 
 // UpdatePlayerStatusWithRound sets a player's status and records which round the status change occurred.
 func UpdatePlayerStatusWithRound(db *sql.DB, gameID int64, discordID, status string, round int) error {
 	_, err := db.Exec(`UPDATE players SET status = ?, status_round = ? WHERE game_id = ? AND discord_id = ?`, status, round, gameID, discordID)
+	return err
+}
+
+// UpdatePlayerWallet sets a player's wallet/payment info.
+func UpdatePlayerWallet(db *sql.DB, gameID int64, discordID, walletInfo string) error {
+	_, err := db.Exec(`UPDATE players SET wallet_info = ? WHERE game_id = ? AND discord_id = ?`, walletInfo, gameID, discordID)
+	return err
+}
+
+// SetPlayerRecruitedRound records the round a player was recruited.
+func SetPlayerRecruitedRound(db *sql.DB, gameID int64, discordID string, round int) error {
+	_, err := db.Exec(`UPDATE players SET recruited_round = ? WHERE game_id = ? AND discord_id = ?`, round, gameID, discordID)
 	return err
 }
 

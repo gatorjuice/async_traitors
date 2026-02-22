@@ -2,11 +2,18 @@ package bot
 
 import "github.com/bwmarrin/discordgo"
 
-// Commands defines all 17 slash commands for the bot.
+// Commands defines all slash commands for the bot.
 var Commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "create-game",
 		Description: "Create a new Traitors game in this channel",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "buyin",
+				Description: "Buy-in amount in dollars (e.g. 5 or 10.50)",
+			},
+		},
 	},
 	{
 		Name:        "join-game",
@@ -38,7 +45,7 @@ var Commands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "vote",
-		Description: "Vote to banish a player",
+		Description: "Vote to banish a player at the Round Table",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionUser,
@@ -61,17 +68,37 @@ var Commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
+		Name:        "recruit",
+		Description: "Choose a player to recruit (traitors only, recruitment night)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "player",
+				Description: "The faithful player to recruit",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "accept-recruitment",
+		Description: "Accept the traitors' offer to join them",
+	},
+	{
+		Name:        "refuse-recruitment",
+		Description: "Refuse the traitors' offer (you will be murdered)",
+	},
+	{
 		Name:        "claim-shield",
 		Description: "Claim you won a shield (honor system)",
 	},
 	{
-		Name:        "start-competition",
-		Description: "Start a competition round (admin)",
+		Name:        "start-mission",
+		Description: "Start a mission (admin)",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
 				Name:        "type",
-				Description: "The type of competition",
+				Description: "The type of mission",
 				Required:    true,
 				Choices: []*discordgo.ApplicationCommandOptionChoice{
 					{Name: "trivia", Value: "trivia"},
@@ -84,19 +111,19 @@ var Commands = []*discordgo.ApplicationCommand{
 	},
 	{
 		Name:        "submit-answer",
-		Description: "Submit your competition answer",
+		Description: "Submit your mission answer",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
 				Name:        "answer",
-				Description: "Your answer to the competition question",
+				Description: "Your answer to the mission question",
 				Required:    true,
 			},
 		},
 	},
 	{
-		Name:        "end-competition",
-		Description: "End current competition (admin)",
+		Name:        "end-mission",
+		Description: "End current mission (admin)",
 	},
 	{
 		Name:        "grant-shield",
@@ -111,18 +138,30 @@ var Commands = []*discordgo.ApplicationCommand{
 		},
 	},
 	{
+		Name:        "force-recruit",
+		Description: "Force-recruit a player as a traitor (admin)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "player",
+				Description: "The player to forcibly recruit as a traitor",
+				Required:    true,
+			},
+		},
+	},
+	{
 		Name:        "set-timers",
 		Description: "Configure phase timers in minutes (admin)",
 		Options: []*discordgo.ApplicationCommandOption{
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        "discussion",
-				Description: "Discussion phase timer in minutes",
+				Name:        "breakfast",
+				Description: "Breakfast phase timer in minutes",
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        "voting",
-				Description: "Voting phase timer in minutes",
+				Name:        "roundtable",
+				Description: "Round Table phase timer in minutes",
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
@@ -131,8 +170,8 @@ var Commands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Type:        discordgo.ApplicationCommandOptionInteger,
-				Name:        "competition",
-				Description: "Competition phase timer in minutes",
+				Name:        "mission",
+				Description: "Mission phase timer in minutes",
 			},
 		},
 	},
@@ -175,5 +214,53 @@ var Commands = []*discordgo.ApplicationCommand{
 	{
 		Name:        "recap",
 		Description: "Show the game timeline so far",
+	},
+	{
+		Name:        "rules",
+		Description: "Show the full detailed rules of The Traitors",
+	},
+	{
+		Name:        "set-buyin",
+		Description: "Set the buy-in amount for this game (admin, lobby only)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "amount",
+				Description: "Dollar amount (e.g. 5 or 10.50)",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "wallet",
+		Description: "Share your payment info with losers (winners only, post-game)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "info",
+				Description: "Your payment info (e.g. @venmo-handle, PayPal email)",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "mark-paid",
+		Description: "Mark that a loser has paid you (winners only, post-game)",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Type:        discordgo.ApplicationCommandOptionUser,
+				Name:        "player",
+				Description: "The player who paid you",
+				Required:    true,
+			},
+		},
+	},
+	{
+		Name:        "payment-status",
+		Description: "View payment status for this game",
+	},
+	{
+		Name:        "nuke-games",
+		Description: "End ALL active/lobby games in this server (admin)",
 	},
 }

@@ -13,11 +13,11 @@ const (
 type Phase string
 
 const (
-	PhaseLobby       Phase = "lobby"
-	PhaseCompetition Phase = "competition"
-	PhaseDiscussion  Phase = "discussion"
-	PhaseVoting      Phase = "voting"
-	PhaseNight       Phase = "night"
+	PhaseLobby      Phase = "lobby"
+	PhaseBreakfast  Phase = "breakfast"
+	PhaseMission    Phase = "mission"
+	PhaseRoundtable Phase = "roundtable"
+	PhaseNight      Phase = "night"
 )
 
 // Role represents a player's secret role.
@@ -40,11 +40,11 @@ const (
 
 // ValidTransitions maps each phase to its valid next phases.
 var ValidTransitions = map[Phase][]Phase{
-	PhaseLobby:       {PhaseCompetition, PhaseDiscussion},
-	PhaseCompetition: {PhaseDiscussion},
-	PhaseDiscussion:  {PhaseVoting},
-	PhaseVoting:      {PhaseNight},
-	PhaseNight:       {PhaseCompetition, PhaseDiscussion},
+	PhaseLobby:      {PhaseBreakfast},
+	PhaseBreakfast:  {PhaseMission},
+	PhaseMission:    {PhaseRoundtable},
+	PhaseRoundtable: {PhaseNight},
+	PhaseNight:      {PhaseBreakfast},
 }
 
 // CanTransition checks if transitioning from one phase to another is valid.
