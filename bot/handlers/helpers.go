@@ -26,12 +26,14 @@ func respondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, msg 
 func requirePlayer(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) (*db.Game, *db.Player) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("require player: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return nil, nil
 	}
 
 	p, err := db.GetPlayer(database, g.ID, i.Member.User.ID)
 	if err != nil {
+		slog.Error("require player: player lookup failed", "error", err, "game_id", g.ID, "user_id", i.Member.User.ID)
 		respondEphemeral(s, i, "You are not a player in this game.")
 		return nil, nil
 	}

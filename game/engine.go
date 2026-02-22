@@ -62,15 +62,18 @@ func (e *Engine) StartGame(gameID int64) error {
 			slog.Error("store traitor thread ID", "error", err)
 		}
 
-		traitors, _ := db.GetPlayersByRole(e.DB, gameID, "traitor")
+		traitors, err := db.GetPlayersByRole(e.DB, gameID, "traitor")
+		if err != nil {
+			slog.Error("start game: get traitors for thread", "error", err, "game_id", gameID)
+		}
 		for _, t := range traitors {
 			notify.AddToThread(e.Session, thread.ID, t.DiscordID)
 		}
 		notify.SendThread(e.Session, thread.ID, "Welcome traitors! This is your private planning channel. Use it to coordinate your murders each night.")
 	}
 
-	// Update game state
-	if err := db.UpdateGameStatus(e.DB, gameID, string(StatusActive), string(PhaseCompetition)); err != nil {
+	// Update game state — starts with Breakfast
+	if err := db.UpdateGameStatus(e.DB, gameID, string(StatusActive), string(PhaseBreakfast)); err != nil {
 		return err
 	}
 	if err := db.UpdateGameRound(e.DB, gameID, 1); err != nil {
@@ -85,7 +88,7 @@ func (e *Engine) StartGame(gameID int64) error {
 
 	embed := notify.GameEmbed(
 		"The Game Begins!",
-		fmt.Sprintf("Roles have been assigned and sent via DM.\n\n**%d players** | **%d traitor(s)** among you\n\nRound 1 begins with the **Competition** phase!", len(players), traitorCount),
+		fmt.Sprintf("Roles have been assigned and sent via DM.\n\n**%d players** | **%d traitor(s)** among you\n\nRound 1 begins with **Breakfast**!", len(players), traitorCount),
 		notify.ColorSuccess,
 		nil,
 	)
@@ -93,10 +96,13 @@ func (e *Engine) StartGame(gameID int64) error {
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
 
 	// Reload game to get full state after updates
-	game, _ = db.GetGameByID(e.DB, gameID)
+	game, err = db.GetGameByID(e.DB, gameID)
+	if err != nil {
+		slog.Error("start game: reload game", "error", err, "game_id", gameID)
+	}
 
-	// Start competition timer
-	e.startPhaseTimer(game, game.TimerCompetitionMinutes)
+	// Start breakfast phase (round 1 has no murder to reveal)
+	e.startBreakfastPhase(game)
 
 	return nil
 }
@@ -118,15 +124,20 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 	var nextPhase Phase
 
 	switch currentPhase {
-	case PhaseCompetition:
-		nextPhase = PhaseDiscussion
-	case PhaseDiscussion:
-		nextPhase = PhaseVoting
-	case PhaseVoting:
+	case PhaseBreakfast:
+		nextPhase = PhaseMission
+	case PhaseMission:
+		nextPhase = PhaseRoundtable
+	case PhaseRoundtable:
 		// Tally votes before advancing
-		_, err := TallyBanishmentVotes(e.DB, e.Session, gameID, game.CurrentRound)
+		banishedID, err := TallyBanishmentVotes(e.DB, e.Session, gameID, game.CurrentRound)
 		if err != nil {
 			slog.Error("tally banishment votes", "error", err)
+		}
+
+		// Check if a traitor was banished and trigger recruitment if needed
+		if banishedID != "" {
+			e.checkRecruitmentNeeded(gameID, banishedID)
 		}
 
 		// Check win condition
@@ -140,10 +151,13 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 
 		nextPhase = PhaseNight
 	case PhaseNight:
-		// Resolve night before advancing
-		if err := ResolveNight(e.DB, e.Session, gameID, game.CurrentRound); err != nil {
-			slog.Error("resolve night", "error", err)
+		// Resolve night before advancing (silently — murder revealed at Breakfast)
+		if !game.RecruitmentPending {
+			if err := ResolveNight(e.DB, e.Session, gameID, game.CurrentRound); err != nil {
+				slog.Error("resolve night", "error", err)
+			}
 		}
+		// If recruitment was pending, it was already resolved via AcceptRecruitment/RefuseRecruitment
 
 		// Check win condition
 		finished, winner, err := e.CheckWinCondition(gameID)
@@ -162,7 +176,7 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 		if err := db.UpdateGameRound(e.DB, gameID, newRound); err != nil {
 			return err
 		}
-		nextPhase = PhaseCompetition
+		nextPhase = PhaseBreakfast
 	default:
 		return fmt.Errorf("cannot advance from phase: %s", currentPhase)
 	}
@@ -176,15 +190,18 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 	}
 
 	// Reload game for updated round
-	game, _ = db.GetGameByID(e.DB, gameID)
+	game, err = db.GetGameByID(e.DB, gameID)
+	if err != nil {
+		slog.Error("advance phase: reload game", "error", err, "game_id", gameID)
+	}
 
 	switch nextPhase {
-	case PhaseCompetition:
-		e.startCompetitionPhase(game)
-	case PhaseDiscussion:
-		e.startDiscussionPhase(game)
-	case PhaseVoting:
-		e.startVotingPhase(game)
+	case PhaseBreakfast:
+		e.startBreakfastPhase(game)
+	case PhaseMission:
+		e.startMissionPhase(game)
+	case PhaseRoundtable:
+		e.startRoundtablePhase(game)
 	case PhaseNight:
 		e.startNightPhase(game)
 	}
@@ -194,6 +211,11 @@ func (e *Engine) AdvancePhase(gameID int64) error {
 
 // CheckWinCondition checks if the game has ended.
 func (e *Engine) CheckWinCondition(gameID int64) (bool, string, error) {
+	game, err := db.GetGameByID(e.DB, gameID)
+	if err != nil {
+		return false, "", err
+	}
+
 	traitors, err := db.GetPlayersByRole(e.DB, gameID, "traitor")
 	if err != nil {
 		return false, "", err
@@ -204,7 +226,8 @@ func (e *Engine) CheckWinCondition(gameID int64) (bool, string, error) {
 		return false, "", err
 	}
 
-	if len(traitors) == 0 {
+	// Don't end if recruitment is pending — traitors will be replenished
+	if len(traitors) == 0 && !game.RecruitmentPending {
 		return true, "faithful", nil
 	}
 
@@ -215,56 +238,176 @@ func (e *Engine) CheckWinCondition(gameID int64) (bool, string, error) {
 	return false, "", nil
 }
 
-func (e *Engine) startCompetitionPhase(game *db.Game) {
-	embed := notify.GameEmbed(
-		"Competition Phase",
-		fmt.Sprintf("Round %d — Competition time!\n\nThe game admin should start a competition with `/start-competition`.\nTimer: %d minutes", game.CurrentRound, game.TimerCompetitionMinutes),
-		notify.ColorInfo,
-		nil,
-	)
-	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
-	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game, game.TimerCompetitionMinutes)
-	e.scheduleWarnings(game, game.TimerCompetitionMinutes, func(remaining int) {
+// checkRecruitmentNeeded checks if recruitment should trigger after a banishment.
+func (e *Engine) checkRecruitmentNeeded(gameID int64, banishedID string) {
+	banished, err := db.GetPlayer(e.DB, gameID, banishedID)
+	if err != nil || banished.Role != string(RoleTraitor) {
+		return // Only trigger recruitment when a traitor is banished
+	}
+
+	traitors, err := db.GetPlayersByRole(e.DB, gameID, "traitor")
+	if err != nil {
+		return
+	}
+
+	alive, err := db.GetAlivePlayers(e.DB, gameID)
+	if err != nil {
+		return
+	}
+
+	game, err := db.GetGameByID(e.DB, gameID)
+	if err != nil {
+		return
+	}
+
+	// Only trigger recruitment if traitors < 2 and not at endgame threshold
+	if len(traitors) < 2 && len(alive) > game.RevealThreshold {
+		if err := db.SetRecruitmentPending(e.DB, gameID, true); err != nil {
+			slog.Error("set recruitment pending", "error", err)
+		}
+		slog.Info("recruitment triggered", "game", gameID, "remaining_traitors", len(traitors))
+	}
+}
+
+func (e *Engine) startBreakfastPhase(game *db.Game) {
+	// Reveal murder from previous night (if not round 1)
+	if game.CurrentRound > 1 {
+		prevRound := game.CurrentRound - 1
+		e.revealMurderAtBreakfast(game, prevRound)
+	} else {
+		// Round 1 — no murder to reveal
+		embed := notify.GameEmbed(
+			"Breakfast",
+			fmt.Sprintf("Round %d — The players gather for Breakfast.\n\nNo one was murdered last night... but the traitors are among you.\nTimer: %d minutes", game.CurrentRound, game.TimerBreakfastMinutes),
+			notify.ColorWarning,
+			nil,
+		)
+		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+		notify.SendEmbed(e.Session, game.ChannelID, embed)
+	}
+
+	e.startPhaseTimer(game, game.TimerBreakfastMinutes)
+	e.scheduleWarnings(game, game.TimerBreakfastMinutes, func(remaining int) {
 		notify.SendChannel(e.Session, game.ChannelID,
-			fmt.Sprintf("Competition phase — %d minutes remaining!", remaining))
+			fmt.Sprintf("Breakfast — %d minutes remaining!", remaining))
 	})
 }
 
-func (e *Engine) startDiscussionPhase(game *db.Game) {
+func (e *Engine) revealMurderAtBreakfast(game *db.Game, prevRound int) {
+	murdered, err := db.GetPlayersByStatusAndRound(e.DB, game.ID, "murdered", prevRound)
+	if err != nil {
+		slog.Error("breakfast: get murdered players", "error", err, "game_id", game.ID, "round", prevRound)
+	}
+
+	// Check if a shield was used
+	shieldLog, err := db.GetShieldLog(e.DB, game.ID)
+	if err != nil {
+		slog.Error("breakfast: get shield log", "error", err, "game_id", game.ID)
+	}
+	shieldUsed := false
+	for _, entry := range shieldLog {
+		if entry.RoundUsed != nil && *entry.RoundUsed == prevRound {
+			shieldUsed = true
+			break
+		}
+	}
+
+	if len(murdered) > 0 {
+		// Dramatic reveal
+		notify.SendChannel(e.Session, game.ChannelID, "The players gather for Breakfast... but someone is missing.")
+		if e.Session != nil {
+			time.Sleep(3 * time.Second)
+		}
+
+		for _, victim := range murdered {
+			embed := notify.GameEmbed(
+				"Murder!",
+				fmt.Sprintf("**%s** was found murdered...", victim.DiscordName),
+				notify.ColorNight,
+				nil,
+			)
+			embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+			notify.SendEmbed(e.Session, game.ChannelID, embed)
+
+			if err := RevealRole(e.DB, e.Session, game.ID, victim.DiscordID); err != nil {
+				slog.Error("reveal role at breakfast", "error", err)
+			}
+		}
+	} else if shieldUsed {
+		notify.SendChannel(e.Session, game.ChannelID, "The players gather for Breakfast...")
+		if e.Session != nil {
+			time.Sleep(2 * time.Second)
+		}
+		embed := notify.GameEmbed(
+			"Shield Block!",
+			"The traitors struck, but their target was protected by a shield!",
+			notify.ColorNight,
+			nil,
+		)
+		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+		notify.SendEmbed(e.Session, game.ChannelID, embed)
+	} else {
+		embed := notify.GameEmbed(
+			"Breakfast",
+			fmt.Sprintf("Round %d — Everyone made it through the night. A peaceful morning.", game.CurrentRound),
+			notify.ColorWarning,
+			nil,
+		)
+		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+		notify.SendEmbed(e.Session, game.ChannelID, embed)
+	}
+
+	// After the reveal, announce the Breakfast phase timer
 	embed := notify.GameEmbed(
-		"Discussion Phase",
-		fmt.Sprintf("Round %d — Time to discuss!\n\nTalk it out. Who do you trust? Who seems suspicious?\nTimer: %d minutes", game.CurrentRound, game.TimerDiscussionMinutes),
+		"Breakfast",
+		fmt.Sprintf("Round %d — Time to discuss! Who do you trust? Who seems suspicious?\nTimer: %d minutes", game.CurrentRound, game.TimerBreakfastMinutes),
 		notify.ColorWarning,
 		nil,
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game, game.TimerDiscussionMinutes)
-	e.scheduleWarnings(game, game.TimerDiscussionMinutes, func(remaining int) {
+}
+
+func (e *Engine) startMissionPhase(game *db.Game) {
+	embed := notify.GameEmbed(
+		"Mission Phase",
+		fmt.Sprintf("Round %d — Mission time!\n\nThe game admin should start a mission with `/start-mission`.\nTimer: %d minutes", game.CurrentRound, game.TimerMissionMinutes),
+		notify.ColorInfo,
+		nil,
+	)
+	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+	notify.SendEmbed(e.Session, game.ChannelID, embed)
+	e.startPhaseTimer(game, game.TimerMissionMinutes)
+	e.scheduleWarnings(game, game.TimerMissionMinutes, func(remaining int) {
 		notify.SendChannel(e.Session, game.ChannelID,
-			fmt.Sprintf("Discussion phase — %d minutes remaining!", remaining))
+			fmt.Sprintf("Mission phase — %d minutes remaining!", remaining))
 	})
 }
 
-func (e *Engine) startVotingPhase(game *db.Game) {
-	alive, _ := db.GetAlivePlayers(e.DB, game.ID)
+func (e *Engine) startRoundtablePhase(game *db.Game) {
+	alive, err := db.GetAlivePlayers(e.DB, game.ID)
+	if err != nil {
+		slog.Error("roundtable: get alive players", "error", err, "game_id", game.ID)
+	}
 	var playerList string
 	for _, p := range alive {
 		playerList += fmt.Sprintf("• %s\n", p.DiscordName)
 	}
 
 	embed := notify.GameEmbed(
-		"Voting Phase",
-		fmt.Sprintf("Round %d — Time to vote!\n\nUse `/vote player:@name` to cast your vote. Votes are secret — results will be revealed after everyone has voted or the timer expires.\nTimer: %d minutes\n\n**Alive players:**\n%s", game.CurrentRound, game.TimerVotingMinutes, playerList),
+		"Round Table",
+		fmt.Sprintf("Round %d — The Round Table convenes!\n\nUse `/vote player:@name` to cast your vote. Votes are secret — results will be revealed after everyone has voted or the timer expires.\nTimer: %d minutes\n\n**Alive players:**\n%s", game.CurrentRound, game.TimerRoundtableMinutes, playerList),
 		notify.ColorDanger,
 		nil,
 	)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
 	notify.SendEmbed(e.Session, game.ChannelID, embed)
-	e.startPhaseTimer(game, game.TimerVotingMinutes)
-	e.scheduleWarnings(game, game.TimerVotingMinutes, func(remaining int) {
-		votes, _ := db.GetVotes(e.DB, game.ID, game.CurrentRound, "voting")
+	e.startPhaseTimer(game, game.TimerRoundtableMinutes)
+	e.scheduleWarnings(game, game.TimerRoundtableMinutes, func(remaining int) {
+		votes, err := db.GetVotes(e.DB, game.ID, game.CurrentRound, "roundtable")
+		if err != nil {
+			slog.Error("roundtable warning: get votes", "error", err, "game_id", game.ID)
+		}
 		voted := make(map[string]bool, len(votes))
 		for _, v := range votes {
 			voted[v.VoterDiscordID] = true
@@ -285,32 +428,76 @@ func (e *Engine) startVotingPhase(game *db.Game) {
 }
 
 func (e *Engine) startNightPhase(game *db.Game) {
-	embed := notify.GameEmbed(
-		"Night Falls...",
-		fmt.Sprintf("Round %d — The players go to sleep.\n\nTraitors, check your private thread to choose your victim.\nTimer: %d minutes", game.CurrentRound, game.TimerNightMinutes),
-		notify.ColorNight,
-		nil,
-	)
-	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
-	notify.SendEmbed(e.Session, game.ChannelID, embed)
+	// Reload game to check recruitment status
+	game, err := db.GetGameByID(e.DB, game.ID)
+	if err != nil {
+		slog.Error("night: reload game", "error", err, "game_id", game.ID)
+	}
 
-	// Prompt traitors in thread
-	if game.TraitorThreadID != "" {
-		alive, _ := db.GetAlivePlayers(e.DB, game.ID)
-		var targets string
-		for _, p := range alive {
-			if p.Role != "traitor" {
-				targets += fmt.Sprintf("• %s\n", p.DiscordName)
+	if game.RecruitmentPending {
+		// Recruitment night
+		embed := notify.GameEmbed(
+			"Night Falls...",
+			fmt.Sprintf("Round %d — The players go to sleep.\n\nSomething stirs in the shadows...\nTimer: %d minutes", game.CurrentRound, game.TimerNightMinutes),
+			notify.ColorNight,
+			nil,
+		)
+		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+		notify.SendEmbed(e.Session, game.ChannelID, embed)
+
+		// Prompt traitors for recruitment in thread
+		if game.TraitorThreadID != "" {
+			alive, err := db.GetAlivePlayers(e.DB, game.ID)
+			if err != nil {
+				slog.Error("recruitment night: get alive players", "error", err, "game_id", game.ID)
 			}
+			var targets string
+			for _, p := range alive {
+				if p.Role != "traitor" {
+					targets += fmt.Sprintf("• %s\n", p.DiscordName)
+				}
+			}
+			notify.SendThread(e.Session, game.TraitorThreadID,
+				fmt.Sprintf("**Recruitment Night %d** — You've lost an ally. Choose a faithful player to recruit to your cause.\n\nUse `/recruit player:@name` to make your choice.\n\n**Available targets:**\n%s", game.CurrentRound, targets))
 		}
-		notify.SendThread(e.Session, game.TraitorThreadID,
-			fmt.Sprintf("**Night %d** — Choose your victim!\n\nUse `/murder-vote player:@name` to vote.\n\n**Available targets:**\n%s", game.CurrentRound, targets))
+	} else {
+		// Normal murder night
+		embed := notify.GameEmbed(
+			"Night Falls...",
+			fmt.Sprintf("Round %d — The players go to sleep.\n\nTraitors, check your private thread to choose your victim.\nTimer: %d minutes", game.CurrentRound, game.TimerNightMinutes),
+			notify.ColorNight,
+			nil,
+		)
+		embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", game.CurrentRound)
+		notify.SendEmbed(e.Session, game.ChannelID, embed)
+
+		// Prompt traitors in thread
+		if game.TraitorThreadID != "" {
+			alive, err := db.GetAlivePlayers(e.DB, game.ID)
+			if err != nil {
+				slog.Error("murder night: get alive players", "error", err, "game_id", game.ID)
+			}
+			var targets string
+			for _, p := range alive {
+				if p.Role != "traitor" {
+					targets += fmt.Sprintf("• %s\n", p.DiscordName)
+				}
+			}
+			notify.SendThread(e.Session, game.TraitorThreadID,
+				fmt.Sprintf("**Night %d** — Choose your victim!\n\nUse `/murder-vote player:@name` to vote.\n\n**Available targets:**\n%s", game.CurrentRound, targets))
+		}
 	}
 
 	e.startPhaseTimer(game, game.TimerNightMinutes)
 	e.scheduleWarnings(game, game.TimerNightMinutes, func(remaining int) {
-		traitors, _ := db.GetPlayersByRole(e.DB, game.ID, "traitor")
-		votes, _ := db.GetVotes(e.DB, game.ID, game.CurrentRound, "night")
+		traitors, err := db.GetPlayersByRole(e.DB, game.ID, "traitor")
+		if err != nil {
+			slog.Error("night warning: get traitors", "error", err, "game_id", game.ID)
+		}
+		votes, err := db.GetVotes(e.DB, game.ID, game.CurrentRound, "night")
+		if err != nil {
+			slog.Error("night warning: get votes", "error", err, "game_id", game.ID)
+		}
 		voted := make(map[string]bool, len(votes))
 		for _, v := range votes {
 			voted[v.VoterDiscordID] = true
@@ -387,10 +574,22 @@ func (e *Engine) postRoundRecap(gameID int64, completedRound int) {
 		return
 	}
 
-	banished, _ := db.GetPlayersByStatusAndRound(e.DB, gameID, "banished", completedRound)
-	murdered, _ := db.GetPlayersByStatusAndRound(e.DB, gameID, "murdered", completedRound)
-	alive, _ := db.GetAlivePlayers(e.DB, gameID)
-	shieldLog, _ := db.GetShieldLog(e.DB, gameID)
+	banished, err := db.GetPlayersByStatusAndRound(e.DB, gameID, "banished", completedRound)
+	if err != nil {
+		slog.Error("round recap: get banished", "error", err, "game_id", gameID, "round", completedRound)
+	}
+	murdered, err := db.GetPlayersByStatusAndRound(e.DB, gameID, "murdered", completedRound)
+	if err != nil {
+		slog.Error("round recap: get murdered", "error", err, "game_id", gameID, "round", completedRound)
+	}
+	alive, err := db.GetAlivePlayers(e.DB, gameID)
+	if err != nil {
+		slog.Error("round recap: get alive players", "error", err, "game_id", gameID)
+	}
+	shieldLog, err := db.GetShieldLog(e.DB, gameID)
+	if err != nil {
+		slog.Error("round recap: get shield log", "error", err, "game_id", gameID)
+	}
 
 	var desc string
 	if len(banished) > 0 {
@@ -477,7 +676,10 @@ func (e *Engine) endGame(gameID int64, winner string, round int) error {
 	}
 
 	// Reveal all remaining roles
-	alive, _ := db.GetAlivePlayers(e.DB, gameID)
+	alive, err := db.GetAlivePlayers(e.DB, gameID)
+	if err != nil {
+		slog.Error("end game: get alive players", "error", err, "game_id", gameID)
+	}
 	var roleList string
 	for _, p := range alive {
 		roleName := "FAITHFUL"
@@ -488,7 +690,10 @@ func (e *Engine) endGame(gameID int64, winner string, round int) error {
 	}
 
 	// Build final stats
-	allPlayers, _ := db.GetAllPlayers(e.DB, gameID)
+	allPlayers, err := db.GetAllPlayers(e.DB, gameID)
+	if err != nil {
+		slog.Error("end game: get all players", "error", err, "game_id", gameID)
+	}
 	var stats string
 	for _, p := range allPlayers {
 		roleName := "FAITHFUL"
@@ -509,6 +714,43 @@ func (e *Engine) endGame(gameID int64, winner string, round int) error {
 		{Name: "Rounds Played", Value: fmt.Sprintf("%d", round), Inline: true},
 		{Name: "Surviving Players", Value: roleList, Inline: false},
 		{Name: "All Players", Value: stats, Inline: false},
+	}
+
+	// Add buy-in payout info if applicable.
+	if game.BuyinAmount > 0 {
+		potTotal := len(allPlayers) * game.BuyinAmount
+		fields = append(fields, &discordgo.MessageEmbedField{
+			Name:   "Prize Pool",
+			Value:  FormatCents(potTotal),
+			Inline: true,
+		})
+
+		winners, losers := CalculatePayouts(allPlayers, winner, game.BuyinAmount)
+
+		var winnerNames string
+		for _, w := range winners {
+			winnerNames += fmt.Sprintf("• **%s**\n", w.PlayerName)
+		}
+		if winnerNames != "" {
+			fields = append(fields, &discordgo.MessageEmbedField{
+				Name:  "Winners",
+				Value: winnerNames,
+			})
+		}
+
+		// DM winners to share payment info.
+		for _, w := range winners {
+			notify.SendDM(e.Session, w.PlayerDiscordID,
+				fmt.Sprintf("Congratulations, you won! You'll receive **%s** from each losing player.\n\nUse `/wallet info:your-payment-info` in the game channel to share your payment details with losers.",
+					FormatCents(game.BuyinAmount/len(winners))))
+		}
+
+		// DM losers with amount owed.
+		for _, l := range losers {
+			notify.SendDM(e.Session, l.PlayerDiscordID,
+				fmt.Sprintf("Game over! You owe **%s** total. Winners will share their payment info shortly via `/wallet`.",
+					FormatCents(l.Amount)))
+		}
 	}
 
 	embed := notify.GameEmbed(title, description, color, fields)

@@ -13,21 +13,22 @@ import (
 	"github.com/gatorjuice/async_traitors/notify"
 )
 
-// HandleStartCompetition starts a competition round.
+// HandleStartCompetition starts a mission round.
 func HandleStartCompetition(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("start competition: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
 
 	if i.Member.User.ID != g.CreatedBy {
-		respondEphemeral(s, i, "Only the game creator can start competitions.")
+		respondEphemeral(s, i, "Only the game creator can start missions.")
 		return
 	}
 
-	if g.CurrentPhase != "competition" {
-		respondEphemeral(s, i, "It's not competition phase right now.")
+	if g.CurrentPhase != "mission" {
+		respondEphemeral(s, i, "It's not the Mission phase right now.")
 		return
 	}
 
@@ -40,14 +41,14 @@ func HandleStartCompetition(s *discordgo.Session, i *discordgo.InteractionCreate
 
 	question, answer, data, err := comp.Generate()
 	if err != nil {
-		respondEphemeral(s, i, "Failed to generate competition.")
+		respondEphemeral(s, i, "Failed to generate mission.")
 		slog.Error("generate competition", "error", err)
 		return
 	}
 
 	_, err = db.CreateCompetition(database, g.ID, g.CurrentRound, compType, data, answer)
 	if err != nil {
-		respondEphemeral(s, i, "Failed to create competition.")
+		respondEphemeral(s, i, "Failed to create mission.")
 		slog.Error("create competition", "error", err)
 		return
 	}
@@ -69,7 +70,7 @@ func HandleStartCompetition(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 
 	embed := notify.GameEmbed(
-		"Competition: "+comp.Description(),
+		"Mission: "+comp.Description(),
 		question,
 		notify.ColorInfo,
 		fields,
@@ -77,7 +78,7 @@ func HandleStartCompetition(s *discordgo.Session, i *discordgo.InteractionCreate
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", g.CurrentRound)
 	notify.SendEmbed(s, g.ChannelID, embed)
 
-	respondEphemeral(s, i, "Competition started!")
+	respondEphemeral(s, i, "Mission started!")
 }
 
 // HandleSubmitAnswer submits a competition answer.
@@ -89,7 +90,8 @@ func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, da
 
 	activeComp, err := db.GetActiveCompetition(database, g.ID)
 	if err != nil {
-		respondEphemeral(s, i, "No active competition right now.")
+		slog.Error("submit answer: get active competition", "error", err, "game_id", g.ID)
+		respondEphemeral(s, i, "No active mission right now.")
 		return
 	}
 
@@ -118,7 +120,10 @@ func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, da
 
 		// For non-speed types, first correct answer wins
 		if activeComp.CompType != "speed" && activeComp.CompType != "scavenger" {
-			results, _ := db.GetCompetitionResults(database, activeComp.ID)
+			results, err := db.GetCompetitionResults(database, activeComp.ID)
+			if err != nil {
+				slog.Error("submit answer: get competition results", "error", err, "competition_id", activeComp.ID)
+			}
 			correctCount := 0
 			for _, r := range results {
 				if r.Correct {
@@ -127,7 +132,7 @@ func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, da
 			}
 			if correctCount == 1 {
 				// This was the first correct answer — award shield
-				game.GrantShield(database, s, g.ID, i.Member.User.ID, "competition", g.CurrentRound)
+				game.GrantShield(database, s, g.ID, i.Member.User.ID, "mission", g.CurrentRound)
 				notify.SendChannel(s, g.ChannelID, fmt.Sprintf("**%s** answered correctly first and earned a shield!", i.Member.User.Username))
 			}
 		}
@@ -136,26 +141,31 @@ func HandleSubmitAnswer(s *discordgo.Session, i *discordgo.InteractionCreate, da
 	}
 }
 
-// HandleEndCompetition ends the current competition.
+// HandleEndCompetition ends the current mission.
 func HandleEndCompetition(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("end competition: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
 
 	if i.Member.User.ID != g.CreatedBy {
-		respondEphemeral(s, i, "Only the game creator can end competitions.")
+		respondEphemeral(s, i, "Only the game creator can end missions.")
 		return
 	}
 
 	activeComp, err := db.GetActiveCompetition(database, g.ID)
 	if err != nil {
-		respondEphemeral(s, i, "No active competition to end.")
+		slog.Error("end competition: get active competition", "error", err, "game_id", g.ID)
+		respondEphemeral(s, i, "No active mission to end.")
 		return
 	}
 
-	results, _ := db.GetCompetitionResults(database, activeComp.ID)
+	results, err := db.GetCompetitionResults(database, activeComp.ID)
+	if err != nil {
+		slog.Error("end competition: get competition results", "error", err, "competition_id", activeComp.ID)
+	}
 
 	// For speed competitions, award shield to fastest correct answer
 	if activeComp.CompType == "speed" {
@@ -168,19 +178,22 @@ func HandleEndCompetition(s *discordgo.Session, i *discordgo.InteractionCreate, 
 			}
 		}
 		if winnerID != "" {
-			game.GrantShield(database, s, g.ID, winnerID, "competition", g.CurrentRound)
+			game.GrantShield(database, s, g.ID, winnerID, "mission", g.CurrentRound)
 			notify.SendChannel(s, g.ChannelID, fmt.Sprintf("<@%s> was the fastest and earned a shield!", winnerID))
 		}
 	}
 
 	if err := db.EndCompetition(database, activeComp.ID); err != nil {
-		respondEphemeral(s, i, "Failed to end competition.")
+		respondEphemeral(s, i, "Failed to end mission.")
 		slog.Error("end competition", "error", err)
 		return
 	}
 
 	// Build leaderboard
-	alive, _ := db.GetAlivePlayers(database, g.ID)
+	alive, err := db.GetAlivePlayers(database, g.ID)
+	if err != nil {
+		slog.Error("end competition: get alive players", "error", err, "game_id", g.ID)
+	}
 	playerNames := make(map[string]string)
 	for _, p := range alive {
 		playerNames[p.DiscordID] = p.DiscordName
@@ -213,9 +226,9 @@ func HandleEndCompetition(s *discordgo.Session, i *discordgo.InteractionCreate, 
 	summary := fmt.Sprintf("%d of %d players participated.\n\n**Leaderboard:**\n%s",
 		len(results), len(alive), leaderboard)
 
-	embed := notify.GameEmbed("Competition Results", summary, notify.ColorSuccess, nil)
+	embed := notify.GameEmbed("Mission Results", summary, notify.ColorSuccess, nil)
 	embed.Footer.Text = fmt.Sprintf("Async Traitors | Round %d", g.CurrentRound)
 	notify.SendEmbed(s, g.ChannelID, embed)
 
-	respondEphemeral(s, i, "Competition ended!")
+	respondEphemeral(s, i, "Mission ended!")
 }

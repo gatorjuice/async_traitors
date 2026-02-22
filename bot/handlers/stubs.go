@@ -13,6 +13,7 @@ import (
 func HandleStartGame(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("start game: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
@@ -35,6 +36,7 @@ func HandleStartGame(s *discordgo.Session, i *discordgo.InteractionCreate, datab
 func HandleVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("vote: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
@@ -59,6 +61,7 @@ func HandleVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *
 func HandleMurderVote(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("murder vote: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
@@ -98,6 +101,7 @@ func HandleClaimShield(s *discordgo.Session, i *discordgo.InteractionCreate, dat
 func HandleGrantShield(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("grant shield: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}
@@ -116,10 +120,93 @@ func HandleGrantShield(s *discordgo.Session, i *discordgo.InteractionCreate, dat
 	respondEphemeral(s, i, "Shield granted!")
 }
 
+// HandleRecruit handles a traitor's recruitment vote.
+func HandleRecruit(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
+	g, err := db.GetGameByChannel(database, i.ChannelID)
+	if err != nil {
+		slog.Error("recruit: game lookup failed", "error", err, "channel_id", i.ChannelID)
+		respondEphemeral(s, i, "No active game found in this channel.")
+		return
+	}
+
+	targetUser := i.ApplicationCommandData().Options[0].UserValue(s)
+	allVoted, err := game.RecruitPlayer(database, s, g.ID, g.CurrentRound, i.Member.User.ID, targetUser.ID)
+	if err != nil {
+		respondEphemeral(s, i, err.Error())
+		return
+	}
+
+	respondEphemeral(s, i, "Your recruitment vote has been recorded.")
+
+	if allVoted {
+		if err := game.ResolveRecruitment(database, s, g.ID, g.CurrentRound); err != nil {
+			slog.Error("resolve recruitment", "error", err, "game", g.ID)
+		}
+	}
+}
+
+// HandleAcceptRecruitment handles accepting a recruitment offer.
+func HandleAcceptRecruitment(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
+	g, err := db.GetGameByChannel(database, i.ChannelID)
+	if err != nil {
+		slog.Error("accept recruitment: game lookup failed", "error", err, "channel_id", i.ChannelID)
+		respondEphemeral(s, i, "No active game found in this channel.")
+		return
+	}
+
+	if err := game.AcceptRecruitment(engine, g.ID, i.Member.User.ID); err != nil {
+		respondEphemeral(s, i, err.Error())
+		return
+	}
+
+	respondEphemeral(s, i, "You have joined the traitors.")
+}
+
+// HandleRefuseRecruitment handles refusing a recruitment offer.
+func HandleRefuseRecruitment(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
+	g, err := db.GetGameByChannel(database, i.ChannelID)
+	if err != nil {
+		slog.Error("refuse recruitment: game lookup failed", "error", err, "channel_id", i.ChannelID)
+		respondEphemeral(s, i, "No active game found in this channel.")
+		return
+	}
+
+	if err := game.RefuseRecruitment(engine, g.ID, i.Member.User.ID); err != nil {
+		respondEphemeral(s, i, err.Error())
+		return
+	}
+
+	respondEphemeral(s, i, "You have refused the traitors' offer.")
+}
+
+// HandleForceRecruit force-recruits a player as a traitor (admin).
+func HandleForceRecruit(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
+	g, err := db.GetGameByChannel(database, i.ChannelID)
+	if err != nil {
+		slog.Error("force recruit: game lookup failed", "error", err, "channel_id", i.ChannelID)
+		respondEphemeral(s, i, "No active game found in this channel.")
+		return
+	}
+
+	if i.Member.User.ID != g.CreatedBy {
+		respondEphemeral(s, i, "Only the game creator can force-recruit.")
+		return
+	}
+
+	targetUser := i.ApplicationCommandData().Options[0].UserValue(s)
+	if err := game.ForceRecruit(engine, g.ID, targetUser.ID); err != nil {
+		respondEphemeral(s, i, "Failed to recruit: "+err.Error())
+		return
+	}
+
+	respondEphemeral(s, i, "Player has been recruited as a traitor.")
+}
+
 // HandleAdvancePhase advances to the next phase (admin).
 func HandleAdvancePhase(s *discordgo.Session, i *discordgo.InteractionCreate, database *sql.DB, engine *game.Engine) {
 	g, err := db.GetGameByChannel(database, i.ChannelID)
 	if err != nil {
+		slog.Error("advance phase: game lookup failed", "error", err, "channel_id", i.ChannelID)
 		respondEphemeral(s, i, "No active game found in this channel.")
 		return
 	}

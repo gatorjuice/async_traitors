@@ -19,8 +19,8 @@ func CastBanishmentVote(database *sql.DB, s *discordgo.Session, gameID int64, ro
 		return false, err
 	}
 
-	if game.CurrentPhase != string(PhaseVoting) {
-		return false, errors.New("voting is not open right now")
+	if game.CurrentPhase != string(PhaseRoundtable) {
+		return false, errors.New("the Round Table is not in session")
 	}
 
 	voter, err := db.GetPlayer(database, gameID, voterID)
@@ -33,12 +33,12 @@ func CastBanishmentVote(database *sql.DB, s *discordgo.Session, gameID int64, ro
 		return false, errors.New("that player cannot be voted for")
 	}
 
-	if err := db.CastVote(database, gameID, round, "voting", voterID, targetID); err != nil {
+	if err := db.CastVote(database, gameID, round, "roundtable", voterID, targetID); err != nil {
 		return false, err
 	}
 
 	// Check if all alive players have voted
-	voteCount, err := db.CountVotes(database, gameID, round, "voting")
+	voteCount, err := db.CountVotes(database, gameID, round, "roundtable")
 	if err != nil {
 		return false, nil
 	}
@@ -62,7 +62,7 @@ func TallyBanishmentVotes(database *sql.DB, s *discordgo.Session, gameID int64, 
 		return "", err
 	}
 
-	votes, err := db.GetVotes(database, gameID, round, "voting")
+	votes, err := db.GetVotes(database, gameID, round, "roundtable")
 	if err != nil {
 		return "", err
 	}
@@ -75,8 +75,14 @@ func TallyBanishmentVotes(database *sql.DB, s *discordgo.Session, gameID int64, 
 	// Reveal all individual votes now that voting is complete
 	var voteLines string
 	for _, v := range votes {
-		voter, _ := db.GetPlayer(database, gameID, v.VoterDiscordID)
-		target, _ := db.GetPlayer(database, gameID, v.TargetDiscordID)
+		voter, err := db.GetPlayer(database, gameID, v.VoterDiscordID)
+		if err != nil {
+			slog.Error("tally votes: get voter", "error", err, "game_id", gameID, "voter_id", v.VoterDiscordID)
+		}
+		target, err := db.GetPlayer(database, gameID, v.TargetDiscordID)
+		if err != nil {
+			slog.Error("tally votes: get target", "error", err, "game_id", gameID, "target_id", v.TargetDiscordID)
+		}
 		voterName := v.VoterDiscordID
 		targetName := v.TargetDiscordID
 		if voter != nil {
