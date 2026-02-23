@@ -55,11 +55,15 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 		slog.Error("create game: add creator as player", "error", err, "game_id", gameID)
 	}
 
-	// Apply optional buy-in if provided.
+	// Apply optional buy-in and end-by if provided.
 	buyinStr := ""
+	endByStr := ""
 	for _, opt := range i.ApplicationCommandData().Options {
-		if opt.Name == "buyin" {
+		switch opt.Name {
+		case "buyin":
 			buyinStr = opt.StringValue()
+		case "end-by":
+			endByStr = opt.StringValue()
 		}
 	}
 	if buyinStr != "" {
@@ -72,11 +76,29 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 			slog.Error("set buyin on create", "error", err)
 		}
 	}
+	if endByStr != "" {
+		deadline, err := parseDeadline(endByStr)
+		if err != nil {
+			respondEphemeral(s, i, "Invalid deadline format. Use `2026-02-24T20:00` or `2026-02-24`.")
+			return
+		}
+		if !deadline.After(time.Now()) {
+			respondEphemeral(s, i, "Deadline must be in the future.")
+			return
+		}
+		if err := db.UpdateGameEndBy(database, gameID, deadline.Format(time.RFC3339)); err != nil {
+			slog.Error("set end-by on create", "error", err)
+		}
+	}
 
 	description := fmt.Sprintf("A new game of Async Traitors has been created!\n\n**Join Code:** `%s`\n\nPlayers can join with `/join-game code:%s` or click the button below.", code, code)
 	if buyinStr != "" {
 		cents, _ := parseDollarsToCents(buyinStr)
 		description += fmt.Sprintf("\n\n**Buy-in:** %s per player", formatCents(cents))
+	}
+	if endByStr != "" {
+		deadline, _ := parseDeadline(endByStr)
+		description += fmt.Sprintf("\n**Deadline:** <t:%d:F>", deadline.Unix())
 	}
 
 	embed := notify.GameEmbed(
@@ -235,6 +257,21 @@ func splitDollarString(s string) []string {
 
 func formatCents(cents int) string {
 	return fmt.Sprintf("$%d.%02d", cents/100, cents%100)
+}
+
+// parseDeadline tries several datetime formats and returns a parsed time.
+func parseDeadline(s string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04",
+		"2006-01-02",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized deadline format: %s", s)
 }
 
 // HandleSetHiatus configures quiet hours for the active game.

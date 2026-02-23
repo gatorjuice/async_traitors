@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
@@ -44,6 +45,15 @@ func HandleGameInfo(s *discordgo.Session, i *discordgo.InteractionCreate, databa
 			Name:  "Quiet Hours",
 			Value: fmt.Sprintf("%s–%s (%s)", game.HiatusStart, game.HiatusEnd, game.HiatusTimezone),
 		})
+	}
+
+	if game.EndBy != "" {
+		if deadline, err := time.Parse(time.RFC3339, game.EndBy); err == nil {
+			fields = append(fields, &discordgo.MessageEmbedField{
+				Name:  "Deadline",
+				Value: fmt.Sprintf("<t:%d:F>", deadline.Unix()),
+			})
+		}
 	}
 
 	if game.BuyinAmount > 0 {

@@ -26,6 +26,7 @@ type Game struct {
 	HiatusEnd              string
 	HiatusTimezone         string
 	BuyinAmount            int
+	EndBy                  string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 }
@@ -51,7 +52,7 @@ func scanGame(row interface{ Scan(...any) error }) (*Game, error) {
 		&g.TimerBreakfastMinutes, &g.TimerRoundtableMinutes, &g.TimerNightMinutes,
 		&g.TimerMissionMinutes, &g.RevealThreshold, &recruitmentPending,
 		&g.HiatusStart, &g.HiatusEnd, &g.HiatusTimezone,
-		&g.BuyinAmount,
+		&g.BuyinAmount, &g.EndBy,
 		&g.CreatedAt, &g.UpdatedAt,
 	)
 	if err != nil {
@@ -61,7 +62,7 @@ func scanGame(row interface{ Scan(...any) error }) (*Game, error) {
 	return g, nil
 }
 
-const gameColumns = `id, join_code, guild_id, channel_id, created_by, status, current_phase, current_round, traitor_thread_id, timer_breakfast_minutes, timer_roundtable_minutes, timer_night_minutes, timer_mission_minutes, reveal_threshold, recruitment_pending, hiatus_start, hiatus_end, hiatus_timezone, buyin_amount, created_at, updated_at`
+const gameColumns = `id, join_code, guild_id, channel_id, created_by, status, current_phase, current_round, traitor_thread_id, timer_breakfast_minutes, timer_roundtable_minutes, timer_night_minutes, timer_mission_minutes, reveal_threshold, recruitment_pending, hiatus_start, hiatus_end, hiatus_timezone, buyin_amount, end_by, created_at, updated_at`
 
 // GetGameByJoinCode retrieves a game by its join code.
 func GetGameByJoinCode(db *sql.DB, joinCode string) (*Game, error) {
@@ -121,6 +122,12 @@ func SetTraitorThreadID(db *sql.DB, gameID int64, threadID string) error {
 // UpdateGamePhase updates a game's current phase.
 func UpdateGamePhase(db *sql.DB, gameID int64, phase string) error {
 	_, err := db.Exec(`UPDATE games SET current_phase = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, phase, gameID)
+	return err
+}
+
+// UpdateGameEndBy sets the end-by deadline for a game.
+func UpdateGameEndBy(db *sql.DB, gameID int64, endBy string) error {
+	_, err := db.Exec(`UPDATE games SET end_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, endBy, gameID)
 	return err
 }
 

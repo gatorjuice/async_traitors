@@ -53,6 +53,25 @@ func (e *Engine) StartGame(gameID int64) error {
 		return fmt.Errorf("assign roles: %w", err)
 	}
 
+	// If a deadline is set, calculate and apply timers
+	var deadlineWarning string
+	if game.EndBy != "" {
+		deadline, err := time.Parse(time.RFC3339, game.EndBy)
+		if err != nil {
+			return fmt.Errorf("parse deadline: %w", err)
+		}
+		timers := CalculateTimersFromDeadline(time.Now(), deadline, len(players), game.HiatusStart, game.HiatusEnd, game.HiatusTimezone)
+		if timers.IsTooTight {
+			return fmt.Errorf("deadline is too short for %d players — need more time or fewer players", len(players))
+		}
+		if err := db.UpdateGameTimers(e.DB, gameID, timers.BreakfastMinutes, timers.RoundtableMinutes, timers.NightMinutes, timers.MissionMinutes); err != nil {
+			return fmt.Errorf("update timers from deadline: %w", err)
+		}
+		if timers.IsTight {
+			deadlineWarning = "\n\n**Warning:** Timers are tight for this deadline. Phases may feel rushed."
+		}
+	}
+
 	// Create traitor thread
 	thread, err := notify.CreateThread(e.Session, game.ChannelID, fmt.Sprintf("Traitors - Game #%d", gameID))
 	if err != nil {
@@ -88,7 +107,7 @@ func (e *Engine) StartGame(gameID int64) error {
 
 	embed := notify.GameEmbed(
 		"The Game Begins!",
-		fmt.Sprintf("Roles have been assigned and sent via DM.\n\n**%d players** | **%d traitor(s)** among you\n\nRound 1 begins with **Breakfast**!", len(players), traitorCount),
+		fmt.Sprintf("Roles have been assigned and sent via DM.\n\n**%d players** | **%d traitor(s)** among you\n\nRound 1 begins with **Breakfast**!%s", len(players), traitorCount, deadlineWarning),
 		notify.ColorSuccess,
 		nil,
 	)

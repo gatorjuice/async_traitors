@@ -108,6 +108,7 @@ func RunMigrations(db *sql.DB) error {
 		`ALTER TABLE games ADD COLUMN recruitment_pending INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE games ADD COLUMN buyin_amount INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE players ADD COLUMN wallet_info TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE games ADD COLUMN end_by TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, q := range alters {
 		// Ignore "duplicate column" errors from re-running migrations.

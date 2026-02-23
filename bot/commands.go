@@ -13,6 +13,11 @@ var Commands = []*discordgo.ApplicationCommand{
 				Name:        "buyin",
 				Description: "Buy-in amount in dollars (e.g. 5 or 10.50)",
 			},
+			{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        "end-by",
+				Description: "Game deadline (e.g. 2026-02-24T20:00 or 2026-02-24)",
+			},
 		},
 	},
 	{
