@@ -77,7 +77,7 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 		}
 	}
 	if endByStr != "" {
-		deadline, err := parseDeadline(endByStr)
+		deadline, err := parseDeadline(endByStr, "")
 		if err != nil {
 			respondEphemeral(s, i, "Invalid deadline format. Use `2026-02-24T20:00` or `2026-02-24`.")
 			return
@@ -86,7 +86,7 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 			respondEphemeral(s, i, "Deadline must be in the future.")
 			return
 		}
-		if err := db.UpdateGameEndBy(database, gameID, deadline.Format(time.RFC3339)); err != nil {
+		if err := db.UpdateGameEndBy(database, gameID, endByStr); err != nil {
 			slog.Error("set end-by on create", "error", err)
 		}
 	}
@@ -97,8 +97,9 @@ func HandleCreateGame(s *discordgo.Session, i *discordgo.InteractionCreate, data
 		description += fmt.Sprintf("\n\n**Buy-in:** %s per player", formatCents(cents))
 	}
 	if endByStr != "" {
-		deadline, _ := parseDeadline(endByStr)
-		description += fmt.Sprintf("\n**Deadline:** <t:%d:F>", deadline.Unix())
+		deadline, _ := parseDeadline(endByStr, "")
+		tzLabel := "UTC"
+		description += fmt.Sprintf("\n**Deadline:** <t:%d:F> (%s)\n*Tip: set quiet hours first with `/set-hiatus` so the deadline uses your timezone.*", deadline.Unix(), tzLabel)
 	}
 
 	embed := notify.GameEmbed(
@@ -260,14 +261,22 @@ func formatCents(cents int) string {
 }
 
 // parseDeadline tries several datetime formats and returns a parsed time.
-func parseDeadline(s string) (time.Time, error) {
-	formats := []string{
-		time.RFC3339,
-		"2006-01-02T15:04",
-		"2006-01-02",
+// Non-RFC3339 formats are interpreted in tz (falls back to UTC if empty or invalid).
+func parseDeadline(s, tz string) (time.Time, error) {
+	// RFC3339 carries its own offset — parse as-is.
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
 	}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
+
+	loc := time.UTC
+	if tz != "" {
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
+	}
+
+	for _, f := range []string{"2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(f, s, loc); err == nil {
 			return t, nil
 		}
 	}

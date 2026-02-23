@@ -1,6 +1,31 @@
 package game
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// ParseDeadline parses a deadline string in several formats. Non-RFC3339 formats
+// are interpreted in tz (falls back to UTC if empty or invalid).
+func ParseDeadline(s, tz string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+
+	loc := time.UTC
+	if tz != "" {
+		if l, err := time.LoadLocation(tz); err == nil {
+			loc = l
+		}
+	}
+
+	for _, f := range []string{"2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(f, s, loc); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized deadline format: %s", s)
+}
 
 // CalculatedTimers holds the per-phase timer values computed from a deadline.
 type CalculatedTimers struct {

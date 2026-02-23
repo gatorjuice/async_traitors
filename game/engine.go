@@ -56,7 +56,7 @@ func (e *Engine) StartGame(gameID int64) error {
 	// If a deadline is set, calculate and apply timers
 	var deadlineWarning string
 	if game.EndBy != "" {
-		deadline, err := time.Parse(time.RFC3339, game.EndBy)
+		deadline, err := ParseDeadline(game.EndBy, game.HiatusTimezone)
 		if err != nil {
 			return fmt.Errorf("parse deadline: %w", err)
 		}

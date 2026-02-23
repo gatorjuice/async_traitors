@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gatorjuice/async_traitors/db"
@@ -48,10 +47,14 @@ func HandleGameInfo(s *discordgo.Session, i *discordgo.InteractionCreate, databa
 	}
 
 	if game.EndBy != "" {
-		if deadline, err := time.Parse(time.RFC3339, game.EndBy); err == nil {
+		if deadline, err := parseDeadline(game.EndBy, game.HiatusTimezone); err == nil {
+			tzLabel := "UTC"
+			if game.HiatusTimezone != "" {
+				tzLabel = game.HiatusTimezone
+			}
 			fields = append(fields, &discordgo.MessageEmbedField{
 				Name:  "Deadline",
-				Value: fmt.Sprintf("<t:%d:F>", deadline.Unix()),
+				Value: fmt.Sprintf("<t:%d:F> (%s)", deadline.Unix(), tzLabel),
 			})
 		}
 	}
